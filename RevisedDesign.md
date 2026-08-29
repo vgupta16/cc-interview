@@ -24,7 +24,12 @@ and cancels it. Everything below is scoped to that loop.
 
 ## Residents
 - The only "users". Seeded — there is no sign-up (see *Deliberately left out*).
-- `id`, `building_id`, `name`, `email`, `phone`, `unit_number`
+- `id`, `building_id`, `building_name`, `name`, `email`, `phone`, `unit_number`
+
+`building_name` is display metadata, denormalized onto the resident. There is no `Building`
+entity: `building_id` is the tenancy key and nothing in this slice reads a building row. The
+name exists only so the UI can say "Building A" instead of a truncated GUID. In a real schema it
+is `buildings.name` and is joined.
 
 **Relationships:** 1..n with Reservations.
 
@@ -103,9 +108,11 @@ The point is the *extent* of the critical section, not that a lock exists. Locki
 are one atomic step or the whole thing is theatre.
 
 **Verified, not asserted:** 30 concurrent `POST`s at a `reservation_capacity: 1` slot return
-exactly one `201` and twenty-nine `409`s. That test is in the PR description; it is the one
-piece of this design that would be embarrassing to get wrong and easy to believe you'd got
-right.
+exactly one `201` and twenty-nine `409`s, and 30 concurrent size-2 `POST`s at the gym
+(`total_capacity: 10`) return exactly five `201`s and twenty-five `409`s — both capacity
+dimensions, against the running API. The commands and their output are in
+[`WhatNext.md`](./WhatNext.md); this is the one piece of the design that would be embarrassing to
+get wrong and easy to believe you'd got right.
 
 **How this survives contact with a real database.** The lock is the in-memory stand-in for a
 `SERIALIZABLE` transaction, or more cheaply `SELECT ... FROM amenities WHERE id = ? FOR UPDATE`
@@ -132,17 +139,41 @@ contention, since it avoids holding a lock across the check. Amenity booking is 
 by nature: a handful of residents, a handful of slots. I'd be paying retry-loop complexity to
 optimize a lock that is never contended.)*
 
+## One booking per resident per slot
+
+Scoped to `(amenity, start_utc)`: a resident may not hold two bookings for the same slot **at the
+same amenity**. Distinct from capacity, and not a policy quota. Two rows for one resident in one
+slot are incoherent on their own terms, and `SlotAvailability.MyReservationId` surfaces only the
+first — so the extras would be invisible in the UI and impossible to cancel, quietly consuming
+capacity. The check sits **inside the same lock** as the capacity decision, for exactly the same
+reason: two concurrent requests would otherwise both find nothing and both insert. Verified with
+20 concurrent identical requests → one `201`, nineteen `409`s.
+
+Holding the gym *and* the party room at 19:00 is still allowed, and that is deliberate rather
+than an oversight in the check. One person can't be in two rooms at once, but a resident booking
+the party room for guests while their partner uses the gym is ordinary, and the record carries no
+attendee to distinguish the two. Whether a resident may hold overlapping slots at *different*
+amenities is a policy call, not a correctness one — it belongs with the quota question (PM
+question 6), not with this guard.
+
 ## Where the user actually meets this
 
 Capacity is decided in exactly one function, `Capacity.Reject`, called by **both** the
 availability endpoint and the create endpoint — so what the UI greys out and what the server
 enforces cannot drift apart. Availability additionally returns the *remaining* room per slot
-rather than a bare boolean, so the UI can stop a too-large party before the request is sent.
-The server still re-checks, because the client is never the authority.
+rather than a bare boolean, so the client has what it needs to stop a too-large party before the
+request is sent. **It doesn't yet** — `isAvailable` is computed for a party of one and the Book
+button never reads `size`, so an oversized party is caught by the server rather than by the row
+that already knows better. Open, and written up in [`WhatNext.md`](./WhatNext.md). The server
+re-checks regardless, because the client is never the authority.
 
-Statuses are meaningfully different: **400** means *ask for less* (party of 7 at an amenity
-whose max is 6 — retrying identically will always fail). **409** means *someone got here first*
-(retrying later, or at another slot, may succeed).
+Statuses carry different advice. **400** means *the request is wrong as asked* — not on the hour,
+already started, outside opening hours, party larger than `max_size_per_reservation`; retrying it
+unchanged will always fail. **409** means *the slot's state refuses it*: fully booked, you already
+hold this slot, or the amenity is closed. Only the first of those three gets better on its own,
+so 409 is "pick another slot", not "retry shortly". (A permanent admin close arguably deserves
+`503` rather than `409` — noted in `WhatNext.md`, latent today because nothing seeds
+`is_open = false`.)
 
 ---
 
@@ -172,7 +203,10 @@ production it is a token claim. Everything downstream already reads the identity
 # API
 
 All routes are under `/api` so the Vite dev proxy forwards them. All times are UTC.
-Errors are RFC7807 `ProblemDetails`, so the UI has exactly one field (`detail`) to render.
+Every error the handlers themselves return is RFC7807 `ProblemDetails`, so the UI has exactly one
+field (`detail`) to render. Errors raised *before* a handler runs — model-binding failures on a
+missing or malformed query parameter — are plain-text ASP.NET exceptions instead, which the
+generated client then fails to parse. Open; see [`WhatNext.md`](./WhatNext.md).
 
 ### `GET /api/residents`
 The "log in as" picker. Unauthenticated on purpose — it exists because auth is out of scope.
@@ -199,12 +233,14 @@ today.
 `unavailableReason` comes from the same `Capacity.Reject` the create path enforces with, so the
 row can say *"This slot is fully booked."* rather than showing free capacity next to a dead
 button. An elapsed slot ("Already started") has room but can't be booked — without the reason,
-the UI reads as broken.
+the UI reads as broken. The reason is computed without reference to `myReservationId`, so on an
+exclusive amenity the slot *you* hold reports itself full next to your own live Cancel button.
+Open; see [`WhatNext.md`](./WhatNext.md).
 
 `myReservationId` is why there is no fourth "list my reservations" endpoint: the same row the UI
 already renders can offer **Book** or **Cancel** without a second round trip.
 
-→ `404` amenity not in the caller's building.
+→ `401` unknown resident · `404` amenity not in the caller's building.
 
 ### `POST /api/reservations`
 ```jsonc
@@ -215,8 +251,13 @@ offer a cancel, and a bare boolean forces a refetch to learn what was just creat
 → `400` not on the hour · already started · outside opening hours · size over
 `max_size_per_reservation`.
 → `409` slot full — the message names the room actually left
-(*"Only 3 space(s) left in this slot — you asked for 6."*).
-→ `404` amenity not in the caller's building.
+(*"Only 3 space(s) left in this slot — you asked for 6."*) · you already hold this slot ·
+amenity closed.
+→ `401` unknown resident · `404` amenity not in the caller's building.
+
+`401` is returned by this endpoint and by availability, but is **not** declared on either, so it
+never reaches the generated client's discriminated union. Open; see
+[`WhatNext.md`](./WhatNext.md).
 
 ### `DELETE /api/reservations/{id}?residentId=`
 → `204` · `404` if it doesn't exist **or isn't yours**. Ownership is part of the lookup
@@ -229,7 +270,7 @@ never existed.
 
 | Left out | Why |
 | --- | --- |
-| **Per-resident booking limits** (TASK.md's "one active booking per resident") | The design deliberately *allows* consecutive and repeat bookings. A limit is a policy question I'd want a PM answer on before encoding — per day? per week? per amenity or across all of them? Rolling window or calendar day? Guessing wrong here means writing the wrong migration later. Mechanically it's cheap: one more count query inside the existing lock, which is already the right place for it. |
+| **Per-resident booking *limits*** (TASK.md's "one active booking per resident") | Consecutive bookings across *different* slots are deliberately allowed. A quota is a policy question I'd want a PM answer on before encoding — per day? per week? per amenity or across all of them? Rolling window or calendar day? Guessing wrong means writing the wrong migration later. Mechanically it's cheap: one more count query inside the existing lock, which is already the right place for it. **Not** deferred: duplicate bookings of the *same* slot by the same resident, which is a correctness hole rather than a policy call — see below. |
 | **Real time zones and DST** | Everything is UTC and opening hours are integer UTC hours. Buildings are physical and residents think in local time, so `buildings.time_zone` (an IANA id) is the real fix, with hours stored local and converted at the edge. Deferred because DST correctness deserves proper attention, not the last twenty minutes of a time box — and getting it *quietly* wrong is worse than not doing it. |
 | **Admin portal** | Residents and amenities are seeded. Since every rule is already an amenity column, the admin surface is CRUD over that table — no new domain logic, so it's genuinely additive later. |
 | **Scheduled job reopening amenities** | `is_open` is a manual override. Nothing in this slice needs a scheduler, and adding one means adding a whole runtime concern for one boolean. |
@@ -237,7 +278,7 @@ never existed.
 | **Waitlists and recurring bookings** | Neither is in TASK.md. Both are significant features that would have eaten the double-booking work, which is what's actually being graded. |
 | **Persistence** | TASK.md says not to. The store is a singleton with the lock discipline already in the right place, so swapping in EF Core means replacing the `lock` with a transaction at the same boundary. |
 | **Authentication** | `residentId` is client-supplied and trivially spoofable. Called out explicitly above rather than hidden, because a reviewer should not have to discover it. |
-| **Pagination, rate limiting, audit log, tests** | A day of slots is at most 24 rows. The rest is production hardening on a slice whose point is the concurrency argument. Given more time the first thing I'd add is an automated version of the 30-way concurrency check — right now it lives in the PR description, which is not where a regression test belongs. |
+| **Pagination, rate limiting, audit log, tests** | A day of slots is at most 24 rows. The rest is production hardening on a slice whose point is the concurrency argument. Given more time the first thing I'd add is an automated version of the 30-way concurrency check — right now it lives in `WhatNext.md` as a transcript, which is not where a regression test belongs. |
 
 ---
 
