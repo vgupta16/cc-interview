@@ -15,9 +15,10 @@ export default defineConfig({
       client: 'fetch',
       clean: true,
       override: {
-        // Return the parsed response body directly (e.g. Amenity[]) rather than a
-        // wrapper object — simpler to consume from components.
-        fetch: { includeHttpResponseReturnType: false },
+        // Return { status, data } rather than the bare body. The scaffold defaulted to the
+        // bare body, but booking needs the status code: a 409 (slot taken) and a 201 (booked)
+        // both come back as JSON objects, and only the status tells them apart.
+        fetch: { includeHttpResponseReturnType: true },
       },
     },
   },

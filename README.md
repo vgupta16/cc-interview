@@ -61,6 +61,32 @@ API, then change `input` in `frontend/orval.config.ts` to
 | Building the UI | `frontend/src/App.tsx` |
 | The typed client | `frontend/src/api/generated/api.ts` (generated) |
 
+## What I changed in the scaffold
+
+See [`RevisedDesign.md`](./RevisedDesign.md) for the reasoning — [`Design.md`](./Design.md) is
+the original first pass, kept unchanged. In short:
+
+- `Amenity` gained `BuildingId`, three capacity columns (`TotalCapacity`, `ReservationCapacity`,
+  `MaxSizePerReservation`), opening/closing hours and `IsOpen`; `MaxBookingMinutes` was removed
+  because every booking is exactly one hour.
+- Added `Resident`, `Capacity` (the one place a booking is allowed or denied) and `Contracts.cs`.
+- `InMemoryStore` seeds two buildings and exposes a `SyncRoot` lock; every read-check-write on
+  reservations happens under it.
+- **`GET /api/amenities` now requires `residentId`** and is scoped to that resident's building.
+- `orval.config.ts` sets `includeHttpResponseReturnType: true`, so the generated client returns
+  `{ status, data }`. Booking needs the status: a `409` and a `201` are both JSON objects.
+
+### Note on `pnpm`
+
+On pnpm 11 the pre-script dependency check exits non-zero over unapproved build scripts, which
+breaks `pnpm dev` and `pnpm gen:api`. Either run `pnpm approve-builds` once, or use `npm`
+(`npm install && npm run dev`), or invoke the tools directly:
+
+```bash
+node node_modules/vite/bin/vite.js                          # dev server
+node node_modules/orval/dist/bin/orval.js --config ./orval.config.ts   # regenerate client
+```
+
 ## Submitting
 
 When you're done, **push your work to a branch and open a pull request against this repository.**
