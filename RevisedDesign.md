@@ -107,6 +107,9 @@ The point is the *extent* of the critical section, not that a lock exists. Locki
 `Add` would be useless — the race is in the gap, not in the mutation. Read, decide, and write
 are one atomic step or the whole thing is theatre.
 
+It is explicit and obvious: the invariant is enforced in the same place a reader is already looking, with no
+isolation level or index definition to go and check elsewhere.
+
 **Verified, not asserted:** 30 concurrent `POST`s at a `reservation_capacity: 1` slot return
 exactly one `201` and twenty-nine `409`s, and 30 concurrent size-2 `POST`s at the gym
 (`total_capacity: 10`) return exactly five `201`s and twenty-five `409`s — both capacity
@@ -114,30 +117,16 @@ dimensions, against the running API. The commands and their output are in
 [`WhatNext.md`](./WhatNext.md); this is the one piece of the design that would be embarrassing to
 get wrong and easy to believe you'd got right.
 
-**How this survives contact with a real database.** The lock is the in-memory stand-in for a
-`SERIALIZABLE` transaction, or more cheaply `SELECT ... FROM amenities WHERE id = ? FOR UPDATE`
-at the top of the transaction — take the amenity row as the lock, then read the slot, check, and
-insert inside it. Same shape, same reasoning, and it works across processes, which a `lock` does
-not.
+## Alternative rejected: push the guarantee into the database
 
-## Alternative rejected: unique index on `(amenity_id, start_utc)`
+The same guarantee can live in SQL instead — a `SERIALIZABLE` transaction, or more cheaply
+`SELECT ... FROM amenities WHERE id = ? FOR UPDATE` at the top of the transaction, taking the
+amenity row as the lock and doing the read, check and insert inside it. Same shape, same
+reasoning, and it works across processes, which a `lock` does not.
 
-Genuinely tempting. The database enforces it for free, it is correct under any level of
-concurrency, it survives multiple app servers, and it needs no application locking at all — you
-just catch the duplicate-key violation and return `409`.
-
-**I rejected it because it can only express `capacity == 1`.** A unique index says "at most one
-row with these values". It cannot say "at most four rows" and it certainly cannot say "at most
-twelve people across those rows", which is the `total_capacity` dimension and the whole reason
-the Pool Cabanas case exists. I would have had to special-case exclusive amenities against a
-unique index and multi-capacity amenities against a lock — two mechanisms, two failure modes,
-and the interesting bugs living in whichever one I thought about less. One mechanism that covers
-every amenity is worth more than a free one that covers a third of them.
-
-*(A third option — an optimistic version column with retry — is the right answer under high
-contention, since it avoids holding a lock across the check. Amenity booking is low-contention
-by nature: a handful of residents, a handful of slots. I'd be paying retry-loop complexity to
-optimize a lock that is never contended.)*
+I'd move it there if there were a performance reason to push this logic into the database. There
+isn't one yet — amenity booking is low-contention by nature, and the rule is easier to read and
+harder to get wrong where it is.
 
 ## One booking per resident per slot
 
