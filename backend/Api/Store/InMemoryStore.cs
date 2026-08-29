@@ -24,6 +24,7 @@ public sealed class InMemoryStore
         {
             Id = Guid.Parse("11111111-aaaa-0000-0000-000000000001"),
             BuildingId = BuildingA,
+            BuildingName = "Building A",
             Name = "Ada Lovelace",
             Email = "ada@example.com",
             Phone = "555-0101",
@@ -33,6 +34,7 @@ public sealed class InMemoryStore
         {
             Id = Guid.Parse("11111111-aaaa-0000-0000-000000000002"),
             BuildingId = BuildingA,
+            BuildingName = "Building A",
             Name = "Grace Hopper",
             Email = "grace@example.com",
             Phone = "555-0202",
@@ -42,6 +44,7 @@ public sealed class InMemoryStore
         {
             Id = Guid.Parse("22222222-bbbb-0000-0000-000000000001"),
             BuildingId = BuildingB,
+            BuildingName = "Building B",
             Name = "Alan Turing",
             Email = "alan@example.com",
             Phone = "555-0012",

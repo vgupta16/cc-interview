@@ -152,7 +152,7 @@ export function App() {
           <select value={residentId} onChange={(e) => setResidentId(e.target.value)} style={field}>
             {residents.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.name} — unit {r.unitNumber}
+                {r.name}, {r.buildingName}, Unit {r.unitNumber}
               </option>
             ))}
           </select>
@@ -206,8 +206,8 @@ export function App() {
 
       {resident && (
         <p style={{ color: '#777', fontSize: 13, marginTop: 0 }}>
-          Showing amenities for building <code>{resident.buildingId.slice(0, 8)}</code>. Switch residents to
-          confirm one building never sees another's.
+          Showing amenities for <strong>{resident.buildingName}</strong>. Switch residents to confirm one
+          building never sees another's.
         </p>
       )}
 

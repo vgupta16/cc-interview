@@ -125,12 +125,22 @@ app.MapPost("/api/reservations", (CreateReservationRequest request, InMemoryStor
 
     // THE CRUX. Reading the slot, deciding on capacity, and inserting are one atomic step.
     // Split them and two concurrent requests both read "one space left", both pass the check,
-    // and both insert — the classic check-then-insert race. See Design.md.
+    // and both insert — the classic check-then-insert race. See RevisedDesign.md.
     lock (store.SyncRoot)
     {
         var inSlot = store.Reservations
             .Where(r => r.AmenityId == amenity.Id && r.StartUtc == start)
             .ToList();
+
+        // One booking per resident per slot. Not a capacity rule — a resident holding two
+        // bookings for the same hour is nonsense on its own terms, and SlotAvailability
+        // surfaces only the first via MyReservationId, so the extras would be invisible and
+        // uncancellable. Checked inside the lock for the same reason capacity is: two
+        // concurrent requests would otherwise both find nothing and both insert.
+        if (inSlot.Any(r => r.ResidentId == resident.Id))
+            return Results.Problem(
+                "You already have a booking for this slot.",
+                statusCode: StatusCodes.Status409Conflict);
 
         if (Capacity.Reject(amenity, inSlot, request.Size) is (int status, string message))
             return Results.Problem(message, statusCode: status);

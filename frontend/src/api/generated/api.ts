@@ -52,6 +52,7 @@ export interface Reservation {
 export interface Resident {
   id: string;
   buildingId: string;
+  buildingName: string;
   name: string;
   email: string;
   /** @nullable */

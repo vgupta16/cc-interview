@@ -399,6 +399,7 @@
                 "required": [
                     "id",
                     "buildingId",
+                    "buildingName",
                     "name",
                     "email",
                     "unitNumber"
@@ -412,6 +413,9 @@
                     "buildingId": {
                         "type": "string",
                         "format": "uuid"
+                    },
+                    "buildingName": {
+                        "type": "string"
                     },
                     "name": {
                         "type": "string"
