@@ -226,6 +226,51 @@ Actual:   2
 
 Two winners on a capacity-1 amenity — the double-booking bug, reproduced on demand.
 
+### The UI shows availability, but does not decide it
+
+The booking screen renders an hour grid for a chosen day, marking each hour Open, *n* left,
+*n* min free, or Full. That's a **view** over arbitrary reservation intervals rather than a model
+of them, and the distinction matters: the API accepts any start/end, so bookings don't respect
+hour boundaries.
+
+A 4:00–5:30 reservation leaves 5:30–6:00 genuinely free, and reporting the 5:00 hour as simply
+"taken" would be a lie the resident can't act on. So each cell runs a small sweep — split the
+hour at every reservation boundary falling inside it, count how many bookings cover each
+resulting slice, compare against capacity. The cell then reports how many minutes are actually
+free and draws a miniature timeline showing where. Clicking a partly-free hour snaps the form to
+that window rather than proposing an hour the server would reject.
+
+This is also why hour granularity is a display choice rather than a domain one: a fixed grid at
+any resolution would eventually misreport a booking that doesn't align to it, whereas the sweep
+is exact for arbitrary intervals.
+
+Worth being explicit that this display is **advisory**. Between the moment the grid renders and
+the moment someone clicks, another resident can take the slot — the client is never the authority
+on what's free. That's precisely why the server does its own atomic check and why the UI still has
+to handle a 409 on a slot it just drew as open. Showing availability optimistically and enforcing
+it pessimistically is the intended split, not a gap.
+
+Selection is a three-click cycle: the first click anchors an hour, the second extends a range
+across everything between, the third clears.
+
+Because bookings don't align to hours, a range's **edges** are computed from the free runs at the
+boundary rather than from the hour marks. Each cell records the contiguous free time touching its
+start and the contiguous free time touching its end. Growing forward from a partly-booked hour
+therefore begins at that hour's free tail (5:30, not 5:00), and can finish part-way into a
+partly-booked hour by taking its free head. What a partly-booked hour *cannot* do is sit in the
+middle of a range, since passing through it would swallow the booked part — so extension stops
+there and treats it as the far edge.
+
+All of that is a UI guard, not enforcement; the server still validates whatever is submitted.
+
+A selection fills the form rather than booking outright, so the times stay editable and a resident
+can still request something the grid can't express. Editing a time by hand drops the highlight
+rather than letting it keep advertising a range the form no longer holds.
+
+Note the grid shows all 24 hours deliberately. Restricting it to plausible daytime hours would
+smuggle in the opening-hours rule that was explicitly deferred below, and a UI that quietly
+assumes a rule the server doesn't enforce is worse than one that shows everything.
+
 ---
 
 ## Multi-tenancy & isolation
@@ -291,7 +336,7 @@ artifact:
 | `Unit` entity | Nothing in this slice needs unit-level data |
 | Shared cross-building amenities | Real but uncommon; one-to-many covers the dominant case |
 | Amenity/building admin CRUD | Assumed preconfigured |
-| Pagination | Meaningless at seed-data scale |
+| Pagination / date-range filtering | The reservations endpoint returns every booking for an amenity and the client filters to the selected day. Fine at seed scale; a real amenity would need a server-side range query, since a year of bookings should not cross the wire to render one day |
 | Past-date booking prevention | Trivial to add, no design content |
 | Notifications, recurring bookings | Orthogonal to the booking invariant |
 | Persistence | Excluded by the brief |
