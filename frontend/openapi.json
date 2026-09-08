@@ -1,18 +1,43 @@
 {
   "openapi": "3.0.1",
-  "info": { "title": "Amenity Reservations API", "version": "v1" },
+  "info": {
+    "title": "Api | v1",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5080"
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
-        "tags": ["System"],
+        "tags": [
+          "System"
+        ],
         "operationId": "getHealth",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
-    "/api/amenities": {
+    "/api/buildings": {
       "get": {
-        "tags": ["Amenities"],
-        "operationId": "getAmenities",
+        "tags": [
+          "Buildings"
+        ],
+        "operationId": "getBuildings",
+        "parameters": [
+          {
+            "name": "X-Resident-Id",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -20,10 +45,207 @@
               "application/json": {
                 "schema": {
                   "type": "array",
-                  "items": { "$ref": "#/components/schemas/Amenity" }
+                  "items": {
+                    "$ref": "#/components/schemas/Building"
+                  }
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/buildings/{buildingId}/amenities": {
+      "get": {
+        "tags": [
+          "Amenities"
+        ],
+        "operationId": "getBuildingAmenities",
+        "parameters": [
+          {
+            "name": "buildingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Resident-Id",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Amenity"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/amenities/{amenityId}/reservations": {
+      "get": {
+        "tags": [
+          "Reservations"
+        ],
+        "operationId": "getAmenityReservations",
+        "parameters": [
+          {
+            "name": "amenityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Resident-Id",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Reservation"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Reservations"
+        ],
+        "operationId": "createReservation",
+        "parameters": [
+          {
+            "name": "amenityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Resident-Id",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reservation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reservations/{reservationId}": {
+      "get": {
+        "tags": [
+          "Reservations"
+        ],
+        "operationId": "getReservation",
+        "parameters": [
+          {
+            "name": "reservationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Resident-Id",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reservation"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Reservations"
+        ],
+        "operationId": "cancelReservation",
+        "parameters": [
+          {
+            "name": "reservationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Resident-Id",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         }
       }
@@ -32,17 +254,121 @@
   "components": {
     "schemas": {
       "Amenity": {
+        "required": [
+          "id",
+          "buildingId",
+          "name"
+        ],
         "type": "object",
-        "additionalProperties": false,
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "name": { "type": "string" },
-          "description": { "type": "string", "nullable": true },
-          "capacity": { "type": "integer", "format": "int32" },
-          "maxBookingMinutes": { "type": "integer", "format": "int32" }
-        },
-        "required": ["id", "name", "capacity", "maxBookingMinutes"]
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buildingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "capacity": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxBookingMinutes": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "Building": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateReservationRequest": {
+        "required": [
+          "startUtc",
+          "endUtc"
+        ],
+        "type": "object",
+        "properties": {
+          "startUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endUtc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Reservation": {
+        "required": [
+          "id",
+          "amenityId",
+          "residentId",
+          "startUtc",
+          "endUtc"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amenityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "residentId": {
+            "type": "string"
+          },
+          "startUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelledUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "System"
+    },
+    {
+      "name": "Buildings"
+    },
+    {
+      "name": "Amenities"
+    },
+    {
+      "name": "Reservations"
+    }
+  ]
 }

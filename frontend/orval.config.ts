@@ -2,10 +2,16 @@ import { defineConfig } from 'orval';
 
 // Generates a typed client from the API's OpenAPI spec.
 //
-// By default we read a committed snapshot (./openapi.json) so `pnpm gen:api` works
-// even before the backend is running. To regenerate from the LIVE backend instead
-// (recommended once you add endpoints), start the API and point `input` at:
-//   http://localhost:5080/openapi/v1.json
+// Reads the committed snapshot (./openapi.json) so `pnpm gen:api` works on a fresh clone
+// without the backend running. The snapshot is refreshed from the live API whenever the
+// endpoints change:
+//
+//   cd backend/Api && dotnet run
+//   curl -s http://localhost:5080/openapi/v1.json -o frontend/openapi.json
+//   cd frontend && pnpm gen:api
+//
+// Note this is a manual step. See DESIGN.md ("Deferred work") on what it would take to stop
+// the committed client from silently drifting out of sync with the backend.
 export default defineConfig({
   amenities: {
     input: './openapi.json',
@@ -15,9 +21,15 @@ export default defineConfig({
       client: 'fetch',
       clean: true,
       override: {
-        // Return the parsed response body directly (e.g. Amenity[]) rather than a
-        // wrapper object — simpler to consume from components.
-        fetch: { includeHttpResponseReturnType: false },
+        // CHANGED from the scaffold's `false`.
+        //
+        // With `false`, the generated functions return only the parsed body and throw away the
+        // status code. That makes a 409 indistinguishable from success at the type level: a
+        // conflict response is parsed and handed back typed as a `Reservation`, so the UI has no
+        // honest way to tell a booking from a rejection. Since surfacing the double-booking
+        // conflict is the whole point of this feature, we keep the status and unwrap `.data`
+        // at the call sites instead.
+        fetch: { includeHttpResponseReturnType: true },
       },
     },
   },

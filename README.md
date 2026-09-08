@@ -5,12 +5,19 @@ reservation feature. This is a **design + AI-usage** exercise, time-boxed to **1
 we do **not** expect you to finish everything. See [`TASK.md`](./TASK.md) for the full brief and
 what we grade.
 
-The plumbing is already wired so you can spend your time on design and the feature, not setup:
+**→ The design write-up is in [`DESIGN.md`](./DESIGN.md).**
 
-- **Backend** — .NET 9 minimal API, in-memory store, OpenAPI on. Amenities endpoint works.
+What's here:
+
+- **Backend** — .NET 9 minimal API, in-memory store, OpenAPI on. Buildings, amenities and
+  reservations, with double-booking prevented by an atomic capacity-check-and-insert.
 - **Frontend** — React + TypeScript + Vite, calling the API through an **orval-generated typed
-  client**. One screen lists amenities.
-- **Reservations is your task** — backend endpoints and the UI for it are stubbed with `TODO(candidate)`.
+  client**. Three screens: your buildings → that building's amenities → book a slot.
+- **Tests** — `backend/Api.Tests`, including a concurrency test that races 16 threads at a
+  capacity-1 amenity and asserts exactly one wins.
+
+Seeded residents: `resident-jeremy` belongs to both buildings, `resident-dana` to one. Switching
+between them in the UI shows the isolation working.
 
 ## Prerequisites
 
@@ -34,32 +41,47 @@ pnpm install      # or: npm install
 pnpm dev          # or: npm run dev
 ```
 
-Open http://localhost:5173 — you should see the seeded amenities. The Vite dev server proxies
-`/api/*` to the backend, so there's no CORS to deal with.
+Open http://localhost:5173. The Vite dev server proxies `/api/*` to the backend, so there's no
+CORS to deal with.
+
+**3) Tests**
+
+```bash
+cd backend
+dotnet test
+```
 
 ## Regenerating the API client
 
-The typed client lives in `frontend/src/api/generated/api.ts` and is generated from an OpenAPI
-spec. A committed snapshot (`frontend/openapi.json`) is used by default so it works on a fresh clone.
+The typed client lives in `frontend/src/api/generated/api.ts`, generated from the committed
+snapshot at `frontend/openapi.json` so it works on a fresh clone with no backend running.
 
 ```bash
-cd frontend
-pnpm gen:api      # regenerates the client from openapi.json
+cd frontend && pnpm gen:api
 ```
 
-Once you add backend endpoints, regenerate from the **live** backend to pick them up: start the
-API, then change `input` in `frontend/orval.config.ts` to
-`http://localhost:5080/openapi/v1.json` and rerun `pnpm gen:api`.
+When the backend's endpoints change, refresh the snapshot first:
 
-## Where to work
+```bash
+# with the API running
+curl -s http://localhost:5080/openapi/v1.json -o frontend/openapi.json
+cd frontend && pnpm gen:api
+```
 
-| You're doing... | Look at |
+This is a manual step — see the note in `DESIGN.md` on what would keep it from drifting.
+
+## Where things are
+
+| Looking for... | Look at |
 | --- | --- |
-| Adding reservation endpoints | `backend/Api/Program.cs` (see the `TODO(candidate)` block) |
-| Domain shape | `backend/Api/Domain/Reservation.cs`, `Amenity.cs` |
-| Persistence | `backend/Api/Store/InMemoryStore.cs` |
-| Building the UI | `frontend/src/App.tsx` |
+| The design write-up | [`DESIGN.md`](./DESIGN.md) |
+| Double-booking prevention | `backend/Api/Store/InMemoryStore.cs` (`TryCreateReservation`) |
+| Booking rules / access checks | `backend/Api/Services/ReservationService.cs` |
+| Endpoints | `backend/Api/Program.cs` |
+| Domain shape | `backend/Api/Domain/` |
+| The UI | `frontend/src/App.tsx` |
 | The typed client | `frontend/src/api/generated/api.ts` (generated) |
+| Tests | `backend/Api.Tests/ReservationTests.cs` |
 
 ## Submitting
 

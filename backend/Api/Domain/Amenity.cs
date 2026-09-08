@@ -6,6 +6,14 @@ namespace Api.Domain;
 public record Amenity
 {
     public required Guid Id { get; init; }
+
+    /// <summary>
+    /// The building this amenity belongs to. One-to-many: an amenity lives in exactly one
+    /// building. A genuinely shared facility (e.g. a pool serving two towers of one complex)
+    /// would need a many-to-many join instead — deferred, see DESIGN.md.
+    /// </summary>
+    public required Guid BuildingId { get; init; }
+
     public required string Name { get; init; }
     public string? Description { get; init; }
 
