@@ -332,6 +332,14 @@ code {
   color: var(--bad-fg);
 }
 
+/* Already elapsed — the server rejects a past start time, so don't offer it. */
+.slot--past {
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 /* An hour you have a booking in. */
 .slot--mine {
   box-shadow: inset 2px 0 0 var(--accent);
@@ -397,6 +405,20 @@ code {
 
 .field input:hover {
   border-color: var(--border-hover);
+}
+
+/* Keeps the reason and the button it explains together as the form wraps. */
+.form__submit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  align-items: flex-start;
+}
+
+.form__error {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--bad-fg);
 }
 
 .btn {

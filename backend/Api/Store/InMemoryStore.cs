@@ -156,7 +156,7 @@ public sealed class InMemoryStore
     {
         lock (_gate)
         {
-            // Half-open intervals [start, end): A and B overlap iff A.Start < B.End && B.Start < A.End.
+            // Half-open intervals [start, end): A and B overlap if A.Start < B.End && B.Start < A.End.
             // Back-to-back bookings share an instant but do not overlap.
             var overlapping = _reservations.Count(r =>
                 r.AmenityId == amenity.Id

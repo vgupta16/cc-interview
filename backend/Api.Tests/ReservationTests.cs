@@ -18,7 +18,10 @@ public class ReservationTests
     private const string BothBuildings = "resident-jeremy";
     private const string MainStreetOnly = "resident-dana";
 
-    private static readonly DateTimeOffset Ten = new(2026, 9, 10, 10, 0, 0, TimeSpan.Zero);
+    // Anchored to tomorrow rather than a fixed date: bookings in the past are rejected, so a
+    // hardcoded date would quietly turn the whole suite red once it slipped by.
+    private static readonly DateTimeOffset Ten =
+        new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero).AddDays(1).AddHours(10);
     private static readonly DateTimeOffset Eleven = Ten.AddHours(1);
     private static readonly DateTimeOffset Twelve = Ten.AddHours(2);
 
@@ -79,6 +82,17 @@ public class ReservationTests
 
         // Oak Street's gym caps a booking at 90 minutes.
         var result = service.Book(OakStreetGymId, BothBuildings, Ten, Ten.AddMinutes(120));
+
+        Assert.Equal(BookingOutcome.Invalid, result.Outcome);
+    }
+
+    [Fact]
+    public void Booking_a_start_time_in_the_past_is_rejected()
+    {
+        var service = NewService();
+        var yesterday = DateTimeOffset.UtcNow.AddDays(-1);
+
+        var result = service.Book(PartyRoomId, BothBuildings, yesterday, yesterday.AddHours(1));
 
         Assert.Equal(BookingOutcome.Invalid, result.Outcome);
     }

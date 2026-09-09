@@ -74,6 +74,13 @@ public sealed class ReservationService
             return new BookingResult(BookingOutcome.Invalid, null, "End time must be after start time.");
         }
 
+        // Comparing two absolute instants, so this needs no timezone knowledge — unlike opening
+        // hours, which are local wall-clock times and were deferred for exactly that reason.
+        if (startUtc < DateTimeOffset.UtcNow)
+        {
+            return new BookingResult(BookingOutcome.Invalid, null, "That start time has already passed.");
+        }
+
         if ((endUtc - startUtc).TotalMinutes > amenity.MaxBookingMinutes)
         {
             return new BookingResult(

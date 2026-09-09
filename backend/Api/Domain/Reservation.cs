@@ -20,8 +20,9 @@ public record Reservation
     public required DateTimeOffset EndUtc { get; init; }
 
     /// <summary>
-    /// Null while the booking is active; set when cancelled. Soft-cancel rather than delete so
-    /// the history survives, and it records *when* — which a bare status flag would not.
+    /// Null while the booking is active; set when cancelled. Soft-deleted in case a dispute
+    /// arises between a resident and a manager, and for analytics — e.g. how often an amenity is
+    /// booked and cancelled.
     /// </summary>
     public DateTimeOffset? CancelledUtc { get; init; }
 }

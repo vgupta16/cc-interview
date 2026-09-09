@@ -1,37 +1,62 @@
 # Amenity Reservations — Design
 
 A thin vertical slice: a resident picks one of their buildings, sees that building's amenities,
-and books a time slot that cannot be double-booked.
+and books an amenity if it's available. 
 
 ---
 
 ## Scope & assumptions
 
-The brief is deliberately underspecified, so here is what I assumed and what I'd ask a PM.
 
-**Assumed**
+**Assumptions**
 
 - **Identity is out of scope, but access control is not.** There is no auth in the scaffold, so
-  the caller asserts who they are via an `X-Resident-Id` header. It's a header rather than a body
-  field or query param specifically so that swapping in real auth means replacing header-parsing
-  with claims-parsing — no endpoint shapes change.
-- **A resident can belong to more than one building.** This is what makes the isolation
-  requirement real rather than decorative, so it's modelled properly (many-to-many) and the UI is
-  built around it.
+  the caller asserts their identity via an `X-Resident-Id` header. It's a header rather than a body field or query param specifically, so that swapping in real auth means replacing header-parsing with claims-parsing.
+- **A resident can belong to more than one building.** People own or rent units in more than
+  one place, and a portfolio product has to represent that. It also means that access depends on
+  membership (e.g. currently rents a unit) rather than a single equality.
 - **An amenity belongs to exactly one building.**
-- **Reservation intervals are half-open, `[start, end)`.** 10:00–11:00 and 11:00–12:00 do not
-  conflict. Getting this wrong makes consecutive slots unbookable, which is a bad default.
-- **Cancellation is a soft delete.** History matters more than row count here.
+  In real life there are cases where multiple buildings share an amenity, like a pool in a large
+  complex. For the scope of this exercise I've tied each amenity to a single building.
+- **A booking can start at the exact moment another ends.** If someone has the party room from
+  11:00 to 12:00, the next resident can book it from 12:00 to 1:00, so one booking's end time and
+  the next one's start time are allowed to be the same instant. 
+- **Cancellations are soft-deleted.** We keep the record in case a dispute arises between a
+  resident and a manager, for analytics, and to catch abuse — a resident working around a booking
+  limit by holding rooms and cancelling shortly before they start.
 - **All times are stored and compared in UTC.**
 
 **Questions I'd ask a PM**
 
-- Are guests/visitors ever bookers, or only residents?
-- Should a booking that has already started be cancellable? Should past slots be visible?
-- Is "one active booking per resident" per amenity, per building, or global — and is it
-  concurrent or lifetime? (I deferred this rule precisely because the answer changes the model.)
-- Do amenities need buffer time between bookings for setup/cleaning?
-- Who administers amenities and their rules — a property manager, a board, support staff?
+- What does a booking need to record beyond who made it? Guest Parking presumably needs the
+  visitor's name or plate for the concierge to check against, and the party room may care about
+  headcount rather than just "one booking." If residents are allowed to book for guests, they may want to include identifying information here too.
+- What limits belong on cancelling? Cancelling a booking that has already started seems fine —
+  it frees the space for someone else — but last-minute cancellations on something like the party
+  room leave a slot nobody can realistically use, and repeated book-then-cancel is a way to hoard
+  time. Is there a notice period, a cap per month, or neither?
+- How many bookings should a resident be able to hold, and how do we count them? Per amenity or
+  per building, and concurrently or so many per week?
+- Do amenities need buffer time between bookings for setup or cleaning?
+- Can a manager close an amenity for maintenance, a private event, or a holiday? Today every
+  unavailable minute is caused by a resident's booking. A blockout would consume availability the
+  same way but for a different reason, and the calendar should say "closed" rather than "full".
+  This is probably the first thing I'd build next.
+- Opening hours are local clock times, so each building needs its own time zone stored against it
+  before that rule can be built at all. The one question I'd actually raise is what a booking's
+  length means across a daylight-saving change: 1:00–3:00 AM on the spring-forward day is two
+  hours on the clock but one hour of real occupancy. Either we validate against the wall-clock
+  span the resident picked, which matches what they think they booked, or against elapsed time,
+  which matches how long the room is actually held. I'd lean to wall-clock and flag it in the UI,
+  but it's a product call.
+- **When an amenity's rules change, what happens to bookings made under the old ones?** If a
+  manager lowers capacity or shortens the maximum booking length, are existing reservations
+  grandfathered, cancelled, or flagged? Currently, the capacity limit
+  is enforced *at write time*, so lowering capacity from 3 to 2 while three overlapping bookings
+  exist leaves the system in a state the booking path would never have allowed. And from a more user-focused perspective, will residents be upset if rules change after they've already made plans? 
+- What happens to a resident's future bookings when they move out? Access is derived from current
+  membership, so the moment their `ResidentBuilding` row goes away they can no longer see or
+  cancel a booking they still hold — it would sit there unreachable.
 
 ---
 
@@ -53,30 +78,26 @@ Resident ──< ResidentBuilding >── Building ──< Amenity ──< Reser
 > For a given amenity and time interval, the number of overlapping active reservations must never
 > exceed that amenity's capacity.
 
-### Three modelling decisions worth stating
+### Two modelling decisions worth stating
 
-**`ResidentBuilding` is a relationship entity, not a bare join.** Today it carries only the two
-ids, but the real thing routes through a **unit** — a resident occupies a unit, a unit belongs to
-a building — and would carry `UnitId`, role (owner vs. renter), status, and move-in/move-out
-dates. I collapsed it because nothing in this slice needs unit-level data, not because the
-simpler shape is correct.
+**`ResidentBuilding` collapses a two-step relationship into one row.** In a real schema there'd be
+a `Unit` table, with each unit belonging to a building, and the link from a resident to their unit
+would carry whether they own or rent and their move-in and move-out dates. Which buildings a
+resident belongs to would then be derived by following resident → unit → building, rather than
+stored directly. Nothing in this slice needs unit-level data, so I skipped the middle step.
 
-**`Reservation` deliberately has no `BuildingId`.** Denormalizing it would make building-scoped
-queries a single index scan instead of a join, which is a real benefit. I skipped it anyway: a
-real database could enforce agreement with the amenity's building via a foreign key, but an
-in-memory `List<T>` enforces nothing, so the two values can silently drift. A drifted copy that
-something later authorizes against is a security hole, not a stale field. The cost of deriving it
-is one join; the cost of the drift is a cross-building leak.
-
-**Amenity-to-building is one-to-many, not many-to-many.** Many-to-many would let one physical
-resource be shared between two buildings — a pool serving two towers of one complex, which is a
-real configuration. It's a strict superset of what I built and would be the migration path if
-that requirement appeared. Rejected here as more expressiveness than this slice needs.
+**`Reservation` deliberately does not store a `BuildingId`.** It doesn't need one — a reservation
+points at an amenity, and the amenity already knows its building. Storing it in both places would
+make building-wide queries faster, but the two copies could drift apart, and since the building is
+exactly what access control checks, a stale copy wouldn't be a cosmetic bug — it would be one
+resident seeing another building's data. Deriving it costs a lookup; getting it wrong costs a leak.
 
 **Representation choices**, stated rather than assumed:
 
-- **Time — `DateTimeOffset`, UTC.** Buildings span time zones and DST makes local wall-clock times
-  ambiguous twice a year. Storing an instant sidesteps both.
+- **Time — `DateTimeOffset`, stored in UTC.** Buildings sit in different time zones, and local
+  clock times break twice a year in two different ways. In the fall an hour repeats, so 1:30 AM
+  happens twice and nothing in the timestamp says which one is meant. In the spring an hour is
+  skipped, so 2:30 AM never happens at all. Storing an exact instant has neither problem.
 - **Ids — `Guid`.** No central coordination needed to stay unique across buildings, and it matches
   the scaffold's existing convention.
 - **Booking length — `int` minutes.** Matches the existing `MaxBookingMinutes` field; the domain
@@ -120,7 +141,8 @@ the extra segment is a client-supplied value that must then be validated for agr
 failure mode with no upside. The boundary is enforced by the access check, not by the URL.
 
 **Validation order** is: amenity exists (404) → resident header present (400) → **access check
-(403)** → end after start (400) → duration within the amenity's max (400) → capacity (409).
+(403)** → end after start (400) → start not already passed (400) → duration within the amenity's
+max (400) → capacity (409).
 Authorization runs before the detailed validation so a non-member can't probe another building's
 booking rules by reading error messages.
 
@@ -154,8 +176,8 @@ reader can throw or read torn state even when capacity isn't at issue.
 
 ### Chosen mechanism
 
-Make the check and the insert **one indivisible operation**, and never touch the reservation list
-outside it.
+In order to close the gap between deciding and writing, the check and the insert happen as **one
+indivisible operation**, and nothing touches the reservation list outside it.
 
 ```csharp
 lock (_gate)
@@ -163,8 +185,8 @@ lock (_gate)
     var overlapping = _reservations.Count(r =>
         r.AmenityId == amenity.Id
         && r.CancelledUtc is null
-        && r.StartUtc < endUtc      // half-open overlap:
-        && startUtc < r.EndUtc);    // A.Start < B.End && B.Start < A.End
+        && r.StartUtc < endUtc      // strict <, so a booking that ends exactly when
+        && startUtc < r.EndUtc);    // this one starts is not counted as a clash
 
     if (overlapping >= amenity.Capacity)
         return Conflict;
@@ -210,8 +232,9 @@ you don't think about concurrency at all, and it passes every single-threaded te
 
 ### Verification
 
-`Api.Tests` has 10 tests. The one that matters fires 16 threads at a capacity-1 amenity, released
-simultaneously by a `Barrier`, repeated over 40 fresh rounds, and asserts exactly one winner.
+`Api.Tests` has 11 tests. In order to show the guarantee actually holds rather than assert it,
+the one that matters fires 16 threads at a capacity-1 amenity, released simultaneously by a
+`Barrier`, repeated over 40 fresh rounds, and asserts exactly one winner.
 
 **I checked that this test can actually fail.** My first version used `Task.Run` and passed —
 and kept passing after I deleted the lock, because the thread pool injects workers gradually and
@@ -226,86 +249,49 @@ Actual:   2
 
 Two winners on a capacity-1 amenity — the double-booking bug, reproduced on demand.
 
-### The UI shows availability, but does not decide it
+### The UI shows availability, but doesn't decide it
 
-The booking screen renders an hour grid for a chosen day, marking each hour Open, *n* left,
-*n* min free, or Full. That's a **view** over arbitrary reservation intervals rather than a model
-of them, and the distinction matters: the API accepts any start/end, so bookings don't respect
-hour boundaries.
-
-A 4:00–5:30 reservation leaves 5:30–6:00 genuinely free, and reporting the 5:00 hour as simply
-"taken" would be a lie the resident can't act on. So each cell runs a small sweep — split the
-hour at every reservation boundary falling inside it, count how many bookings cover each
-resulting slice, compare against capacity. The cell then reports how many minutes are actually
-free and draws a miniature timeline showing where. Clicking a partly-free hour snaps the form to
-that window rather than proposing an hour the server would reject.
-
-This is also why hour granularity is a display choice rather than a domain one: a fixed grid at
-any resolution would eventually misreport a booking that doesn't align to it, whereas the sweep
-is exact for arbitrary intervals.
-
-Worth being explicit that this display is **advisory**. Between the moment the grid renders and
-the moment someone clicks, another resident can take the slot — the client is never the authority
-on what's free. That's precisely why the server does its own atomic check and why the UI still has
-to handle a 409 on a slot it just drew as open. Showing availability optimistically and enforcing
-it pessimistically is the intended split, not a gap.
-
-Selection is a three-click cycle: the first click anchors an hour, the second extends a range
-across everything between, the third clears.
-
-Because bookings don't align to hours, a range's **edges** are computed from the free runs at the
-boundary rather than from the hour marks. Each cell records the contiguous free time touching its
-start and the contiguous free time touching its end. Growing forward from a partly-booked hour
-therefore begins at that hour's free tail (5:30, not 5:00), and can finish part-way into a
-partly-booked hour by taking its free head. What a partly-booked hour *cannot* do is sit in the
-middle of a range, since passing through it would swallow the booked part — so extension stops
-there and treats it as the far edge.
-
-All of that is a UI guard, not enforcement; the server still validates whatever is submitted.
-
-A selection fills the form rather than booking outright, so the times stay editable and a resident
-can still request something the grid can't express. Editing a time by hand drops the highlight
-rather than letting it keep advertising a range the form no longer holds.
-
-Note the grid shows all 24 hours deliberately. Restricting it to plausible daytime hours would
-smuggle in the opening-hours rule that was explicitly deferred below, and a UI that quietly
-assumes a rule the server doesn't enforce is worse than one that shows everything.
+The booking screen draws an hour grid marking each hour open, partly free, or full, worked out
+from the same reservations the server holds. It's advisory only. Between the grid rendering and
+someone clicking, another resident can take the slot — so the server still runs its own atomic
+check, and the screen has to handle a conflict on an hour it just drew as open. Showing
+availability optimistically and enforcing it strictly is the intended split, not a gap.
 
 ---
 
 ## Multi-tenancy & isolation
 
-The `BuildingId` column prevents nothing on its own. What prevents the leak is that **every** read
-and write is filtered by the caller's own membership, derived server-side:
+In order to ensure residents can only view and book amenities in buildings they belong to, every
+read and write runs the same check before doing anything else:
 
 ```csharp
 CanAccess(residentId, amenity) =>
     resident belongs to amenity.BuildingId
 ```
 
-One method, called by the amenity list, the reservation list, create, and cancel. It's the
-security-critical path, so it exists once rather than being copy-pasted to four call sites.
+Recording a `BuildingId` on each amenity isn't enough on its own — the id only helps if something
+actually checks it. So the check lives in one method rather than being repeated at each of the
+four places that need it, and the building it compares against always comes from the resident's
+own membership, never from anything the caller sent. Today that's the header; under real auth it
+would be the login. Skipping a check like this is a well-known vulnerability class — OWASP calls
+it Insecure Direct Object Reference: pass someone else's id, get their data.
 
-**The failure mode if you skip it:** a resident of Building A passes Building B's `amenityId` and
-reads or books its slots. That's cross-building data leakage — OWASP's Insecure Direct Object
-Reference, under Broken Access Control — not a cosmetic bug.
+For the same reason I replaced the scaffold's `GET /api/amenities`, which listed every amenity no
+matter who asked, with `GET /api/buildings/{id}/amenities`. It did no harm before buildings
+existed, but afterwards it was the one route not scoped like the others.
 
-The rule that keeps it honest: **the building is never taken from client input.** It's derived
-from the resident's membership. Today the resident comes from a header; under real auth it comes
-from the authenticated principal's claims, and nothing else about this changes.
+Tenancy and concurrency don't interact: the membership check runs before the lock and doesn't
+touch the overlap math.
 
-I also **removed the scaffold's `GET /api/amenities`**, which returned every amenity in the system
-with no notion of who was asking. Harmless before buildings existed; a leak the moment they do.
+**Indexing.** There's no real database here, but in order to keep these checks fast at real
+volume, `Reservation` would want an index on `(AmenityId, StartUtc)`, since the overlap query runs
+on every booking, plus one on `ResidentId` for listing a resident's own bookings. `Amenity` would
+want one on `BuildingId`, and `ResidentBuilding` on `(ResidentId, BuildingId)` — which its
+uniqueness constraint already provides — because the access check reads it on every request.
 
-Tenancy and concurrency are orthogonal here — membership is an authorization gate checked before
-the lock, and it doesn't touch the overlap math.
-
-**Indexing**, since there's no real database to put it in: `Reservation` would want
-`(AmenityId, StartUtc)` — the overlap query is the hot path on every booking — plus `ResidentId`
-for "my bookings". `Amenity` wants `BuildingId`. `ResidentBuilding` wants
-`(ResidentId, BuildingId)`, which the uniqueness constraint provides for free, since `CanAccess`
-hits it on every request. Because `Reservation` has no `BuildingId`, a building-scoped reservation
-query needs a join through `Amenity` — the accepted cost of not denormalizing.
+One consequence of leaving `BuildingId` off `Reservation`: listing every booking in a building has
+to go through `Amenity` rather than reading straight from an index. That's the cost of not keeping
+two copies of the same fact, and I think it's the right trade.
 
 ---
 
@@ -317,6 +303,9 @@ artifact:
 - **Implemented — max booking length.** `MaxBookingMinutes` already existed on `Amenity`, so
   enforcing it was free.
 - **Implemented — ownership on cancel.** You can only cancel your own booking (403 otherwise).
+- **Implemented — no start times in the past.** Worth contrasting with opening hours below: this
+  compares two absolute instants, so it needs no timezone knowledge at all. The calendar also
+  greys out elapsed hours, so the UI never offers something the server will refuse.
 - **Deferred — opening hours.** These are *local wall-clock* times, so they need a timezone per
   building and DST handling, and the scaffold stores no timezone anywhere. A naive UTC hour
   comparison would look correct in a demo and quietly break in November. I'd rather defer it than
@@ -334,10 +323,9 @@ artifact:
 | Opening hours | Needs per-building timezone + DST; half-building it is worse than not |
 | One-booking-per-resident | Ambiguous scope — a PM question, not a coding one |
 | `Unit` entity | Nothing in this slice needs unit-level data |
-| Shared cross-building amenities | Real but uncommon; one-to-many covers the dominant case |
+| Shared cross-building amenities (many-to-many) | The model I'd actually build; one-to-many was enough to demonstrate isolation and capacity here without the extra surface |
 | Amenity/building admin CRUD | Assumed preconfigured |
 | Pagination / date-range filtering | The reservations endpoint returns every booking for an amenity and the client filters to the selected day. Fine at seed scale; a real amenity would need a server-side range query, since a year of bookings should not cross the wire to render one day |
-| Past-date booking prevention | Trivial to add, no design content |
 | Notifications, recurring bookings | Orthogonal to the booking invariant |
 | Persistence | Excluded by the brief |
 | CI check on the generated client | See below |

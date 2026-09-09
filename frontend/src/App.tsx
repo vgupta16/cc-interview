@@ -77,6 +77,15 @@ export function App() {
   const [notice, setNotice] = useState<Notice>(null);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * A `datetime-local` input reports an unparseable value as an empty string, so the value alone
+   * can't tell "hasn't been filled in" from "half-typed and invalid". `validity.badInput` can.
+   */
+  const [badInput, setBadInput] = useState(false);
+
+  /** Don't scold someone about a form they haven't touched yet. */
+  const [touched, setTouched] = useState(false);
+
   // Changing the resident starts the whole flow over — different person, different access.
   useEffect(() => {
     let cancelled = false;
@@ -183,6 +192,8 @@ export function App() {
         cellStart,
         cellEnd,
         segments,
+        /** The server rejects a start time in the past, so don't offer one. */
+        past: cellStart.getTime() < Date.now(),
         freeMinutes: Math.round(freeMs / 60_000),
         /** Some capacity somewhere in the hour — i.e. the cell is worth clicking. */
         anyFree: segments.some((s) => s.free),
@@ -235,6 +246,9 @@ export function App() {
     setSel(null);
     setStart('');
     setEnd('');
+    setBadInput(false);
+    // Back to a pristine form, so drop the "pick a time" nag with it.
+    setTouched(false);
   }, []);
 
   /**
@@ -247,6 +261,8 @@ export function App() {
    */
   const clickHour = (h: number) => {
     setNotice(null);
+    setTouched(true);
+    setBadInput(false);
     const cell = hours[h];
 
     // Third click of the cycle.
@@ -257,7 +273,7 @@ export function App() {
 
     // First click: anchor on this hour's first open window.
     if (!sel) {
-      if (!cell.anyFree) return;
+      if (!cell.anyFree || cell.past) return;
       setSel({ from: h, to: h, complete: false });
       applyTimes(cell.firstFree!.start, cell.firstFree!.end);
       return;
@@ -288,6 +304,7 @@ export function App() {
     let far = forward ? anchor.cellEnd.getTime() : anchor.cellStart.getTime();
 
     for (let i = sel.from + (forward ? 1 : -1); forward ? i <= h : i >= h; i += forward ? 1 : -1) {
+      if (hours[i].past) break; // only reachable growing backwards, but the server would reject it
       const next = forward ? hours[i].headEnd : hours[i].tailStart;
       if (next === null) break; // this hour is booked right where we'd enter it
       reach = i;
@@ -312,7 +329,33 @@ export function App() {
    *  (e.g. 5:30–6:00) is described accurately instead of as a whole hour. */
   const selectedMinutes =
     start && end ? Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60_000) : 0;
-  const overLimit = !!amenity && selectedMinutes > amenity.maxBookingMinutes!;
+
+  /**
+   * Why the Reserve button is disabled, in words.
+   *
+   * Only rules that depend on the form's own values live here — they're deterministic, so the
+   * client can be authoritative about them and say so immediately rather than making the resident
+   * submit to find out. Wording matches the server's messages so the two never contradict.
+   *
+   * Capacity is deliberately absent. Whether a slot is free depends on other residents' bookings,
+   * which can change between this render and the submit, so blocking on it client-side would
+   * refuse bookings that are genuinely valid. That check stays on the server and comes back as a
+   * 409.
+   */
+  const formError = useMemo(() => {
+    if (!amenity) return null;
+    if (badInput) return 'That is not a valid date and time.';
+    if (!start || !end) return 'Pick a start and end time.';
+
+    const from = new Date(start);
+    const to = new Date(end);
+    if (to <= from) return 'End time must be after the start time.';
+    if (from.getTime() < Date.now()) return 'That start time has already passed.';
+    if (selectedMinutes > amenity.maxBookingMinutes!) {
+      return `${amenity.name} can be booked for at most ${amenity.maxBookingMinutes} minutes at a time.`;
+    }
+    return null;
+  }, [amenity, start, end, selectedMinutes, badInput]);
 
   const book = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -456,16 +499,24 @@ export function App() {
 
           <div className="slots">
             {hours.map((slot) => {
-              const state = !slot.anyFree ? 'full' : slot.untouched ? 'free' : 'partial';
+              const state = slot.past
+                ? 'past'
+                : !slot.anyFree
+                  ? 'full'
+                  : slot.untouched
+                    ? 'free'
+                    : 'partial';
               const selected = !!sel && slot.hour >= sel.from && slot.hour <= sel.to;
 
-              const label = !slot.anyFree
-                ? 'Full'
-                : slot.untouched
-                  ? 'Open'
-                  : slot.bookableThroughout
-                    ? `${amenity.capacity! - slot.busiest} left`
-                    : `${slot.freeMinutes} min free`;
+              const label = slot.past
+                ? 'Past'
+                : !slot.anyFree
+                  ? 'Full'
+                  : slot.untouched
+                    ? 'Open'
+                    : slot.bookableThroughout
+                      ? `${amenity.capacity! - slot.busiest} left`
+                      : `${slot.freeMinutes} min free`;
 
               return (
                 <button
@@ -479,11 +530,13 @@ export function App() {
                     .filter(Boolean)
                     .join(' ')}
                   aria-pressed={selected}
-                  disabled={!slot.anyFree}
+                  disabled={!slot.anyFree || slot.past}
                   onClick={() => clickHour(slot.hour)}
                   title={
-                    !slot.anyFree
-                      ? 'Fully booked'
+                    slot.past
+                      ? 'Already passed'
+                      : !slot.anyFree
+                        ? 'Fully booked'
                       : slot.bookableThroughout
                         ? `${amenity.capacity! - slot.busiest} of ${amenity.capacity} available all hour`
                         : `Free ${slot.segments
@@ -509,12 +562,11 @@ export function App() {
             })}
           </div>
 
-          {sel && start && end && (
-            <p className={`selection${overLimit ? ' selection--warn' : ''}`}>
+          {sel && start && end && selectedMinutes > 0 && (
+            <p className="selection">
               Selected {timeLabel(new Date(start))} – {timeLabel(new Date(end))} ·{' '}
               {selectedMinutes >= 60 && `${Math.floor(selectedMinutes / 60)} hr `}
               {selectedMinutes % 60 > 0 && `${selectedMinutes % 60} min`}
-              {overLimit && ` — over the ${amenity.maxBookingMinutes} minute maximum`}
             </p>
           )}
 
@@ -528,6 +580,8 @@ export function App() {
                 value={start}
                 onChange={(e) => {
                   setStart(e.target.value);
+                  setBadInput(e.target.validity.badInput);
+                  setTouched(true);
                   setSel(null);
                 }}
                 required
@@ -540,14 +594,21 @@ export function App() {
                 value={end}
                 onChange={(e) => {
                   setEnd(e.target.value);
+                  setBadInput(e.target.validity.badInput);
+                  setTouched(true);
                   setSel(null);
                 }}
                 required
               />
             </label>
-            <button type="submit" className="btn btn--primary" disabled={busy || !start || !end}>
-              {busy ? 'Booking…' : 'Reserve'}
-            </button>
+            <div className="form__submit">
+              {/* Say why the button is disabled instead of leaving it inert and unexplained —
+                  but only once they've actually interacted with it. */}
+              {touched && formError && <p className="form__error">{formError}</p>}
+              <button type="submit" className="btn btn--primary" disabled={busy || formError !== null}>
+                {busy ? 'Booking…' : 'Reserve'}
+              </button>
+            </div>
           </form>
 
           <h3 className="subhead">
