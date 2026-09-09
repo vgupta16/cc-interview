@@ -42,7 +42,7 @@ and books an amenity if it's available.
 - Do amenities need buffer time between bookings for setup or cleaning?
 - Can a manager close an amenity for maintenance, a private event, or a holiday? Today every
   unavailable minute is caused by a resident's booking. A blockout would consume availability the
-  same way but for a different reason, and the calendar should say "closed" rather than "full".
+  same way but for a different reason, and the calendar should say "closed" rather than "full."
   This is probably the first thing we'd build next.
 - Opening hours are local clock times, so each building needs its own time zone stored against it
   before that rule can be built at all. The one question we'd actually raise is what a booking's
@@ -147,9 +147,8 @@ by the access check, not by the URL.
 
 **Validation order** is: amenity exists (404) → resident header present (400) → **access check
 (403)** → end after start (400) → start not already passed (400) → duration within the amenity's
-max (400) → capacity (409).
-Authorization runs before the detailed validation so a non-member can't probe another building's
-booking rules by reading error messages.
+max (400) → capacity (409). Authorization runs before the detailed validation so a non-member
+can't probe another building's booking rules by reading error messages.
 
 ---
 
@@ -208,7 +207,7 @@ Three supporting decisions:
 2. **Reads take the lock too**, and return a `.ToList()` snapshot. Handing out the live list would
    let a caller enumerate it while another thread writes.
 3. **One global lock, not per-amenity.** Contention is irrelevant at this scale, and per-amenity
-   locking would introduce a complexity beyond the scope of this project.
+   locking would introduce complexity beyond the scope of this project.
 
 **Note this constrains the layering.** Booking rules live in a `ReservationService`, but capacity
 checking deliberately does *not* — it stays in the store, next to the insert. Hoisting it into the
@@ -216,7 +215,7 @@ service for tidier separation would put the check and the write in different lay
 reintroduce the exact race above. Everything the service validates is stateless, which is why it's
 safe outside the lock.
 
-### Unused Alternative
+### Unused alternative
 
 **Optimistic concurrency** — version the amenity's availability, and on write, confirm the version
 hasn't changed since the read; retry on conflict. This is the right answer for a real deployment:
@@ -304,8 +303,8 @@ artifact:
   greys out elapsed hours, so the UI never offers something the server will refuse.
 - **Deferred — opening hours.** These are *local wall-clock* times, so they need a timezone per
   building and DST handling, and the scaffold stores no timezone anywhere. A naive UTC hour
-  comparison would look correct in a demo and quietly break in November. We decided to defer it
-  rather than ship something that looks done.
+  comparison would look correct in a demo and quietly break in November. We decided to defer this
+  feature rather than ship something that looks done.
 - **Deferred — limiting how many bookings a resident can hold.** As stated above, we weren't
   sure how those limits should be set, and working that out seemed beyond the scope of this
   project.
@@ -346,8 +345,8 @@ this repo doesn't grant a PR author.
 - Added `ReservationService`; endpoints stay thin.
 - Replaced the unscoped `GET /api/amenities` with the building-scoped route.
 - Added the `Api.Tests` project.
-- `orval.config.ts`: pointed `input` at the live spec, and flipped
-  `includeHttpResponseReturnType` to `true`. With it `false`, the generated functions discard the
-  status code and return a 409's error body typed as a `Reservation` — success and conflict are
-  indistinguishable at the type level. Since surfacing the conflict is the point of the feature,
-  the UI needs the status.
+- `orval.config.ts`: refreshed the committed `openapi.json` snapshot from the running API, and
+  flipped `includeHttpResponseReturnType` to `true`. With it `false`, the generated functions
+  discard the status code and return a 409's error body typed as a `Reservation` — success and
+  conflict are indistinguishable at the type level. Since surfacing the conflict is the point of
+  the feature, the UI needs the status.
