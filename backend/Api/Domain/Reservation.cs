@@ -45,7 +45,10 @@ public record Reservation
     public required DateTimeOffset CreatedAtUtc { get; init; }
     public DateTimeOffset? CanceledAtUtc { get; init; }
 
-    /// <summary>Length of the booking. Convenience for rule checks; not serialized as a field.</summary>
+    /// <summary>The booked interval as a half-open window. Convenience for availability checks.</summary>
+    [JsonIgnore]
+    public TimeWindow Window => new(StartUtc, EndUtc);
+
     [JsonIgnore]
     public TimeSpan Duration => EndUtc - StartUtc;
 
