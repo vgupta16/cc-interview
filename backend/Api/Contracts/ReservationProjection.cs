@@ -43,6 +43,13 @@ public static class ReservationProjection
             .Select(r => new MyReservation(r.Id, r.AmenityId, r.StartUtc, r.EndUtc, r.Status))
             .ToList();
 
+    /// <summary>
+    /// A single reservation the caller owns — the response to creating or cancelling one. Only
+    /// ever called with a reservation the service has already confirmed belongs to the caller.
+    /// </summary>
+    public static MyReservation One(Reservation reservation) =>
+        new(reservation.Id, reservation.AmenityId, reservation.StartUtc, reservation.EndUtc, reservation.Status);
+
     /// <summary>Strips a reservation down to the fact that its window is taken.</summary>
     private static BusyWindow Anonymous(Reservation reservation) =>
         new(reservation.StartUtc, reservation.EndUtc);

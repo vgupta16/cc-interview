@@ -51,3 +51,15 @@ public sealed record CreateReservationRequest(
     Guid AmenityId,
     DateTimeOffset StartUtc,
     DateTimeOffset EndUtc);
+
+/// <summary>
+/// A resident the dev-only identity picker can act as. Exists solely because there is no auth in
+/// this exercise; a real deployment would have no such endpoint.
+/// </summary>
+public sealed record ResidentSummary(
+    Guid Id,
+    string DisplayName,
+    string? UnitNumber,
+    Guid BuildingId,
+    string BuildingName,
+    string BuildingTimeZoneId);
