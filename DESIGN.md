@@ -466,6 +466,13 @@ else.
 - **Vitest added and pinned to 2.x.** Vitest 5 requires Vite 6+, and the scaffold pins Vite 5.4.
   Pinning the test runner is the smaller change than upgrading the build tool mid-exercise;
   `vite.config.ts` now takes `defineConfig` from `vitest/config` to carry the `test` block.
+- **`frontend/pnpm-workspace.yaml` added and committed.** pnpm 10+ refuses to run dependency
+  install scripts unless they are listed, and hard-fails with `ERR_PNPM_IGNORED_BUILDS` when any
+  are unlisted — verified on a clean install, so without this file a fresh clone cannot run
+  `pnpm install --frozen-lockfile`. `esbuild` is allowed because its install script links the
+  platform binary. `@scarf/scarf`, pulled in transitively by orval, is explicitly **denied**
+  rather than allowed: its only build step is a telemetry ping. Client generation, `vite build`,
+  and the test suite were all confirmed to work from a clean install with it blocked.
 
 ### On time zones
 

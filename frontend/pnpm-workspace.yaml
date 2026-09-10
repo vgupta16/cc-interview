@@ -1,0 +1,11 @@
+# pnpm 10+ refuses to run dependency install scripts unless they are listed here, and errors out
+# with ERR_PNPM_IGNORED_BUILDS when any are unlisted. Committing this file is what keeps
+# `pnpm install --frozen-lockfile` reproducible and non-interactive for everyone else.
+allowBuilds:
+  # Vite's bundler. Its install script links the platform binary, so it genuinely needs to run.
+  esbuild: true
+
+  # Analytics, pulled in transitively by orval via @stoplight/spectral-core. Its only build step
+  # is a telemetry ping, so it is denied rather than allowed — verified that orval generation,
+  # `vite build`, and the test suite all work from a clean install with this blocked.
+  '@scarf/scarf': false
