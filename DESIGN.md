@@ -356,10 +356,14 @@ machine-readable `code` extension so the UI branches on the reason rather than s
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `validation_failed` | inverted/zero-length interval, exceeds `MaxBookingMinutes`, past start, beyond horizon |
-| 409 | `slot_unavailable` | capacity would be exceeded; includes conflicting **windows**, not who holds them |
-| 404 | `amenity_not_found` / `reservation_not_found` | also the cross-tenant response |
+| 409 | `slot_unavailable` | capacity would be exceeded; carries the conflicting **windows**, not who holds them |
+| 404 | `amenity_not_found`, `reservation_not_found` | also the cross-tenant response |
 | 401 | `resident_required` | missing or unknown resident header |
+| 400 | `invalid_interval`, `exceeds_max_booking_length`, `starts_in_past`, `beyond_booking_horizon` | one code per rule |
+
+The 400s are split by rule rather than collapsed into a single `validation_failed`, so the UI can
+point at the field that's wrong — a booking that's too long and one that's too far ahead need
+different corrections.
 
 ---
 
@@ -411,11 +415,24 @@ for extracting booking logic out of `Program.cs`.
 - **Encapsulated:** `InMemoryStore.Reservations` is no longer a public mutable `List`. This is not
   tidiness — a public list invites callers to bypass the gate, silently reintroducing the exact
   race being prevented. Access goes through methods that hold it.
-- **Orval:** the committed `openapi.json` snapshot stays the input (deterministic, works offline),
-  with a script to refresh it from the running backend. The `X-Resident-Id` header is injected by a
-  thin per-call wrapper over the generated functions, since Orval's fetch client already accepts
-  `RequestInit`; a custom `mutator` is the cleaner option once there are more than a handful of
-  call sites.
+- **Added a dev-only `GET /api/dev/residents`,** so the UI can offer a "you are…" picker. It
+  exists only because there is no auth; a real deployment would not publish a resident roster.
+- **Orval now generates through a custom `mutator`** (`src/api/http.ts`) rather than calling
+  `fetch` directly. Two defects in the stock fetch client forced this, and both mattered:
+
+  Non-2xx bodies were parsed into the success type, so a 409 conflict came back typed as a
+  `MyReservation`. Surfacing double-booking clearly is the point of the feature, so failures have
+  to be distinguishable. The wrapper throws a typed `ApiError` carrying the problem `code` and
+  the conflicting windows.
+
+  Header parameters were dropped from the generated signatures even though `X-Resident-Id` is
+  correctly documented in the spec. The wrapper attaches it centrally, which is also where a real
+  app would attach a bearer token.
+
+  `includeHttpResponseReturnType: false` is kept so call sites still receive the parsed body
+  rather than a `{ data, status, headers }` envelope.
+- **Orval input** stays the committed `openapi.json` snapshot (deterministic, works offline).
+  `pnpm gen:api:live` refreshes it from a running backend and regenerates.
 
 ---
 
