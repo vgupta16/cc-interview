@@ -8,13 +8,17 @@ namespace Api.Reservations;
 /// </summary>
 public static class Availability
 {
-    /// <summary>Active reservations sharing at least one instant with <paramref name="candidate"/>.</summary>
+    /// <summary>
+    /// Reservations sharing at least one instant with <paramref name="candidate"/>. Cancelled
+    /// bookings are filtered out here rather than being the caller's responsibility, so passing
+    /// an unfiltered collection is a no-op instead of a way to double-book a freed slot.
+    /// </summary>
     public static IReadOnlyList<Reservation> Overlapping(
-        IEnumerable<Reservation> active,
+        IEnumerable<Reservation> reservations,
         TimeWindow candidate) =>
-        active.Where(r => r.Window.Overlaps(candidate))
-              .OrderBy(r => r.StartUtc)
-              .ToList();
+        reservations.Where(r => r.IsActive && r.Window.Overlaps(candidate))
+                    .OrderBy(r => r.StartUtc)
+                    .ToList();
 
     /// <summary>
     /// The largest number of reservations held simultaneously at any instant inside
