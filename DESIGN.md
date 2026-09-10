@@ -306,9 +306,50 @@ transition to `Canceled` rather than a deletion, it is naturally idempotent, and
 a `reason` body without redefining the verb. `DELETE` is the defensible alternative had we chosen
 hard deletes.
 
-**List response and privacy.** Other residents' reservations return as `{ startUtc, endUtc }` busy
-blocks with no identity; your own additionally carry `id` and `residentId`, so the UI can render
-the cancel affordance without a second request. That is the default from question 2.
+### List response and privacy
+
+Anonymization is a **server-side** guarantee, not a UI convention. Filtering in the client would be
+no protection at all — anyone can read the raw response in dev tools or curl the endpoint
+directly — so the identifying fields must never leave the process.
+
+Three things enforce that:
+
+**Domain records are never serialized.** `Reservation` is internal to the backend; every
+reservation endpoint returns a dedicated contract type. This is a deliberate departure from the
+scaffold's `Results.Ok(store.Amenities)` pattern, which returns the domain record directly.
+
+**No reservation response carries a resident identifier — including the caller's own.** There is
+nowhere for one to leak from, because no such field exists on any response type. The caller
+already knows who they are, so echoing it back buys nothing.
+
+**The two audiences are separate types, not one type with nullable fields.** A single DTO with an
+optional `residentId` would rely on remembering to null it out on every code path; one missed
+branch is a silent leak. Instead:
+
+```jsonc
+GET /api/amenities/{amenityId}/reservations
+{
+  "amenityId": "...", "capacity": 2, "maxBookingMinutes": 90,
+  "windowStartUtc": "...", "windowEndUtc": "...",
+
+  // Every active reservation in the window, from anyone. Start and end only —
+  // this type has no field capable of identifying a resident.
+  "busy": [ { "startUtc": "...", "endUtc": "..." } ],
+
+  // The caller's own subset, carrying the id needed to cancel.
+  "mine": [ { "id": "...", "startUtc": "...", "endUtc": "...", "status": "Active" } ]
+}
+```
+
+`busy` is the complete occupancy picture including the caller's own bookings, so availability is
+computed from one array with no client-side merging. `mine` is the actionable subset. The
+duplication is intentional.
+
+Note that reservation **ids** are also withheld for other residents' bookings. Cancellation is
+authorized server-side regardless, so leaking them wouldn't permit anything — but an opaque
+identifier a resident has no use for is one more thing to correlate across responses.
+
+What necessarily *is* disclosed is that a window is occupied. That is the feature.
 
 **Errors are RFC 9457 `ProblemDetails`** (built into ASP.NET Core via `AddProblemDetails`) with a
 machine-readable `code` extension so the UI branches on the reason rather than string-matching:
@@ -335,6 +376,12 @@ for extracting booking logic out of `Program.cs`.
   overlap.
 - **Building isolation:** an identical window on Building B's party room succeeds; a cross-tenant
   booking returns not-found; Building B's reservations never appear in Building A's list.
+- **Privacy, asserted against serialized JSON rather than object shape:** build a schedule
+  containing another resident's booking, serialize the response with the API's own JSON options,
+  and assert that neither their resident id nor their reservation id appears anywhere in the
+  payload. Asserting on the DTO's properties would only re-state the type definition; asserting on
+  the bytes catches a field added later, a `JsonExtensionData` bag, or a projection that starts
+  passing the domain record through.
 - **Concurrency — the test that proves the mechanism:** N tasks released simultaneously off a
   `Barrier`, all booking the identical slot on a capacity-1 amenity, asserting **exactly one**
   success and N−1 conflicts; then capacity 2 asserting exactly two. Note the asymmetry: this test
@@ -358,6 +405,9 @@ for extracting booking logic out of `Program.cs`.
   from `string` to `Guid` for referential consistency with the new `Resident` entity.
 - **Extracted:** booking logic into a service with pure predicates alongside it. Endpoints in
   `Program.cs` stay thin — parse, delegate, map the result to a status code.
+- **Added a contracts layer.** Reservation endpoints return dedicated response types built by a
+  single projection function, rather than serializing domain records the way the amenities worked
+  example does. See §7 for why this is the mechanism that keeps resident identity server-side.
 - **Encapsulated:** `InMemoryStore.Reservations` is no longer a public mutable `List`. This is not
   tidiness — a public list invites callers to bypass the gate, silently reintroducing the exact
   race being prevented. Access goes through methods that hold it.
