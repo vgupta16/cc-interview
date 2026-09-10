@@ -393,11 +393,31 @@ for extracting booking logic out of `Program.cs`.
   payload. Asserting on the DTO's properties would only re-state the type definition; asserting on
   the bytes catches a field added later, a `JsonExtensionData` bag, or a projection that starts
   passing the domain record through.
-- **Concurrency — the test that proves the mechanism:** N tasks released simultaneously off a
-  `Barrier`, all booking the identical slot on a capacity-1 amenity, asserting **exactly one**
-  success and N−1 conflicts; then capacity 2 asserting exactly two. Note the asymmetry: this test
-  is deterministic with the gate in place but only probabilistic at catching its absence, so it is
-  verified to fail when the gate is removed rather than trusted to.
+- **Concurrency — the tests that prove the mechanism.** Twelve dedicated threads are held at a
+  `Barrier` and released together, so the requests are genuinely simultaneous rather than merely
+  fast. Real threads rather than pooled tasks, because a barrier across `Task.Run` work items can
+  stall waiting for tasks the pool hasn't scheduled. Each scenario runs ten rounds:
+  - all twelve booking one exclusive slot: exactly **one** succeeds, eleven get
+    `slot_unavailable`, and exactly one row is persisted;
+  - all twelve booking one capacity-2 slot: exactly **two** succeed;
+  - twelve booking *different, non-overlapping* hours on the same amenity: all twelve succeed and
+    all twelve persist — the assertion that would expose a lost write rather than a wrong refusal;
+  - different amenities, and different buildings, booked at once: no interference;
+  - one thread cancelling while eleven race for the freed slot: never two active holders.
+
+### Evidence, not assertion
+
+A concurrency test that has never been observed to fail proves nothing. The gate in
+`InMemoryStore.WithAmenityLock` was removed and the suite re-run four times. The two capacity
+tests failed on every run; the lost-write and cancel-race tests failed on two runs out of four —
+which is exactly the expected shape, since a torn `List<T>.Add` is a much narrower window than a
+stale availability read. No isolation test failed, which is also correct: tenant separation is a
+property of the data model, not of the lock. With the gate restored the suite passes on five
+consecutive runs.
+
+The same check was applied to the capacity sweep. Replacing it with the naive
+`Overlapping(...).Count < capacity` fails precisely the two tests written to catch it and nothing
+else.
 - **Cancel:** own booking frees the slot for rebooking; someone else's returns not-found;
   cancelling twice is idempotent.
 - **Frontend (Vitest):** slot derivation and error mapping live in pure helper modules and are
@@ -459,11 +479,24 @@ library keeps the exercise dependency-free.
 
 ---
 
-## 10. TBD
+## 10. Next steps
 
-Answer PM questions 1, 4, 5, and 10, then land opening hours and the per-resident booking limit —
-both are small once defined, and the data model already accommodates them. Replace the in-memory
-store with Postgres, moving the no-double-book invariant from the application gate into a
-`tstzrange` exclusion constraint for capacity-1 amenities and serializable-isolation counting for
-capacity > 1. Swap the `X-Resident-Id` shim for real authentication behind the single resolver it
-already lives in.
+**With another four hours,** I'd take PM answers to questions 1, 4, and 5 and land opening hours
+and the per-resident booking limit — both are small once defined, and the model already has the
+columns. I'd then move the store to Postgres, which is where the interesting change happens: the
+no-double-book invariant stops being an application lock and becomes a `tstzrange` exclusion
+constraint for capacity-1 amenities, with serializable-isolation counting for capacity > 1. And
+I'd replace the `X-Resident-Id` shim with real authentication, which touches only
+`RequestContext` because that is the single seam identity enters through.
+
+**Beyond that,** in rough order of value: a booking-horizon and quota policy so a single resident
+can't monopolize the party room; staff roles, which mostly means modeling maintenance blackouts
+as reservations owned by the building; and a waitlist, which is the natural answer to the 409 a
+resident currently just has to retry around.
+
+**One piece of debt worth naming.** The UI's availability grid re-implements the server's peak
+concurrency sweep in TypeScript. The duplication is deliberate for now — it keeps the client
+responsive and the two implementations are each tested against the same trap case — but it is
+two places to change one rule. If the grid grows any more logic, the honest fix is a server-side
+availability endpoint returning computed slots, which is also the point at which PM question 3
+about booking granularity has to be answered anyway.
