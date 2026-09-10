@@ -209,6 +209,13 @@ without holding its gate, and it mirrors how the data would be sharded in a real
 The overlap predicate and the capacity check are pure functions defined once and used by both the
 validator and the inserter — one source of truth, unit-testable without a web host.
 
+**The UI's availability grid is a display aid, not an authority.** It is derived client-side from
+the busy windows, so it is a snapshot that can be stale by the time the resident clicks. The
+server re-checks capacity inside the gate on submit, which means a slot shown as free can still
+return 409 — and the UI surfaces that conflict rather than pretending the grid was a reservation.
+Any design where the client's view of availability is treated as binding reintroduces exactly the
+check-then-write race described above, just with a much wider window.
+
 ### The capacity subtlety
 
 The obvious check — *count overlapping reservations, reject if ≥ capacity* — is **wrong**. With
@@ -433,6 +440,22 @@ for extracting booking logic out of `Program.cs`.
   rather than a `{ data, status, headers }` envelope.
 - **Orval input** stays the committed `openapi.json` snapshot (deterministic, works offline).
   `pnpm gen:api:live` refreshes it from a running backend and regenerates.
+- **Frontend logic extracted to `src/lib`** — `time.ts` (zone conversion and formatting),
+  `schedule.ts` (the availability grid), `errors.ts` (problem `code` → what to tell the resident).
+  Keeping these pure and DOM-free is what makes them testable without React Testing Library.
+- **Vitest added and pinned to 2.x.** Vitest 5 requires Vite 6+, and the scaffold pins Vite 5.4.
+  Pinning the test runner is the smaller change than upgrading the build tool mid-exercise;
+  `vite.config.ts` now takes `defineConfig` from `vitest/config` to carry the `test` block.
+
+### On time zones
+
+Instants are UTC end to end; the building's IANA zone is applied only at the edges. Converting a
+resident's wall-clock input *back* to an instant is the part that isn't free, since the offset
+depends on the instant being solved for — `zonedToUtc` resolves it in two passes so the hours
+either side of a DST transition land correctly. The day grid derives its end from the next local
+midnight rather than adding 24 hours, so a spring-forward day correctly shows 23 hours. Both are
+covered by tests using real 2026 US transition dates. Doing this with `Intl` rather than a date
+library keeps the exercise dependency-free.
 
 ---
 
