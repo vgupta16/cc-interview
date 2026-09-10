@@ -26,8 +26,10 @@ import {
  * would be exactly the kind of unscoped read that the building-scoping work removed elsewhere.
  */
 const DEMO_RESIDENTS = [
-  { id: 'resident-jeremy', hint: 'belongs to two buildings' },
-  { id: 'resident-dana', hint: 'belongs to one' },
+  { id: 'resident-jeremy', hint: 'Oak Street + Main Street' },
+  { id: 'resident-sam', hint: 'Oak Street only' },
+  { id: 'resident-varun', hint: 'Main Street only' },
+  { id: 'resident-brian', hint: 'Main Street only' },
 ] as const;
 
 /** Every call carries the caller's identity. Under real auth this becomes an Authorization header. */

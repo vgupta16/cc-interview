@@ -81,15 +81,23 @@ public sealed class InMemoryStore
     };
 
     /// <summary>
-    /// Seeded stand-in for what an auth system would tell us. "resident-jeremy" belongs to both
-    /// buildings (so the multi-building flow has something to show); "resident-dana" belongs to
-    /// only one (so a cross-building attempt can be demonstrated returning 403).
+    /// Seeded stand-in for what an auth system would tell us. Each resident exists to make one
+    /// behaviour demonstrable:
+    ///
+    /// - jeremy is in both buildings, so the multi-building flow has something to show.
+    /// - sam shares Oak Street with jeremy, which is what makes a real double-booking demo
+    ///   possible — two different people competing for the same slot.
+    /// - varun and brian share Main Street, so the same thing works over there.
+    /// - nobody is in every building, so any resident can demonstrate a 403 by reaching for one
+    ///   they don't belong to.
     /// </summary>
     public List<ResidentBuilding> ResidentBuildings { get; } = new()
     {
         new ResidentBuilding { ResidentId = "resident-jeremy", BuildingId = OakStreetId },
         new ResidentBuilding { ResidentId = "resident-jeremy", BuildingId = MainStreetId },
-        new ResidentBuilding { ResidentId = "resident-dana", BuildingId = MainStreetId },
+        new ResidentBuilding { ResidentId = "resident-sam", BuildingId = OakStreetId },
+        new ResidentBuilding { ResidentId = "resident-varun", BuildingId = MainStreetId },
+        new ResidentBuilding { ResidentId = "resident-brian", BuildingId = MainStreetId },
     };
 
     private readonly object _gate = new();

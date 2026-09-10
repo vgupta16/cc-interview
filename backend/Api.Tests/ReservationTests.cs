@@ -4,9 +4,9 @@ using Api.Store;
 namespace Api.Tests;
 
 /// <summary>
-/// Four tests, chosen to cover the invariant the design is built around rather than to pad a
-/// coverage number. The concurrency test is the one that matters: everything else asserts that
-/// the rules are written correctly, that one asserts they can't be raced.
+/// Chosen to cover the invariant the design is built around rather than to pad a coverage
+/// number. The concurrency test is the one that matters: everything else asserts that the rules
+/// are written correctly, that one asserts they can't be raced.
 /// </summary>
 public class ReservationTests
 {
@@ -16,7 +16,7 @@ public class ReservationTests
     private static readonly Guid MainStreetParkingId = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
     private const string BothBuildings = "resident-jeremy";
-    private const string MainStreetOnly = "resident-dana";
+    private const string MainStreetOnly = "resident-varun";
 
     // Anchored to tomorrow rather than a fixed date: bookings in the past are rejected, so a
     // hardcoded date would quietly turn the whole suite red once it slipped by.
@@ -112,7 +112,7 @@ public class ReservationTests
     {
         var service = NewService();
 
-        // resident-dana belongs to Main Street only; the party room is at Oak Street.
+        // resident-varun belongs to Main Street only; the party room is at Oak Street.
         var result = service.Book(PartyRoomId, MainStreetOnly, Ten, Eleven);
 
         Assert.Equal(BookingOutcome.Forbidden, result.Outcome);

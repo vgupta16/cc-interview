@@ -16,8 +16,10 @@ What's here:
 - **Tests** — `backend/Api.Tests`, including a concurrency test that races 16 threads at a
   capacity-1 amenity and asserts exactly one wins.
 
-Seeded residents: `resident-jeremy` belongs to both buildings, `resident-dana` to one. Switching
-between them in the UI shows the isolation working.
+Seeded residents: `resident-jeremy` is in both buildings, `resident-sam` in Oak Street, and
+`resident-varun` and `resident-brian` in Main Street. Because each building has at least two
+residents, you can watch one take a slot the other then can't book. Switching between them in the
+UI also shows the isolation working — each sees only their own buildings.
 
 ## Prerequisites
 
