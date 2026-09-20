@@ -121,3 +121,10 @@ Abstractions exist only where I expect change, and I deliberately did not build 
 - **Scaffold changes**: `InMemoryStore` was replaced by `SeedData`, `InMemoryAmenityCatalog` and `InMemoryReservationRepository`; the orval client now returns `{ data, status }` (`includeHttpResponseReturnType: true`) because the default swallowed non-2xx responses; `frontend/openapi.json` was regenerated from the live API; the amenity response is `AmenityResponse` and keeps `maxBookingMinutes`.
 - **Known gap**: a request body that fails framework binding (for example missing `required` fields) yields the framework's own `400`, not an `ApiError`, and that check runs before the header check. The UI always sends a valid body. A production version would do authentication first and format binding errors as `ApiError`.
 - **Running on a machine that only has a newer .NET runtime**: the project targets net9.0; with only .NET 10 installed, run with `DOTNET_ROLL_FORWARD=Major`.
+
+## 9. How it was verified
+
+- `cd backend/Api.Tests && DOTNET_ROLL_FORWARD=Major dotnet test`: 139 tests written from the invariants in this doc (occupancy sweep, each rule, authorization, tenant isolation, concurrent booking races, HTTP through `WebApplicationFactory`).
+- `cd e2e && npx playwright test`: 10 browser scenarios through the real UI (booking, capacity 1 and 2, back-to-back, cancel and ownership, rule errors, tenant isolation).
+- Mutation checks: removing the per-amenity lock turns 7 concurrency tests red (including the HTTP one), and loosening the capacity comparison from `>=` to `>` turns the browser double-booking scenarios red. Both were reverted.
+- The tests were written by a separate agent working from this doc and the contract skeleton, not from the implementation.
