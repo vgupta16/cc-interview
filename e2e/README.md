@@ -1,7 +1,7 @@
 # Browser end-to-end tests
 
 Playwright (Chromium) against the real backend + Vite frontend. Selectors come from the
-"UI test contract" in `docs/design.md`.
+`data-testid` attributes in `frontend/src/components` and `frontend/src/App.tsx`.
 
     cd e2e && npm install && npx playwright install chromium
     npx playwright test            # starts backend (:5080) and frontend (:5173) if not running

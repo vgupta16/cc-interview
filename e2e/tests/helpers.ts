@@ -176,7 +176,7 @@ export const test = base.extend<{ scenario: Scenario }>({
 export { expect };
 
 // ---------------------------------------------------------------------------------------------
-// UI helpers (selectors come from the UI test contract in docs/design.md)
+// UI helpers (selectors are the data-testid attributes in frontend/src)
 // ---------------------------------------------------------------------------------------------
 
 export const ui = {
