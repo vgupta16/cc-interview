@@ -1,5 +1,10 @@
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
+// Test setup/cleanup calls go straight to the backend, not through the Vite dev proxy: the proxy
+// was observed stalling on Playwright's reused connections (5s timeouts), which is a dev-server
+// quirk, not app behavior. The browser under test still uses the proxy exactly as a user would.
+const API = process.env.API_URL ?? 'http://localhost:5080';
+
 // ---------------------------------------------------------------------------------------------
 // Seed data (backend/Api/Store/SeedData.cs)
 // ---------------------------------------------------------------------------------------------
@@ -67,7 +72,7 @@ export async function apiList(
   buildingId: string,
   amenityId: string,
 ): Promise<ApiReservation[]> {
-  const res = await request.get(`/api/amenities/${amenityId}/reservations`, { headers: headers(buildingId) });
+  const res = await request.get(`${API}/api/amenities/${amenityId}/reservations`, { headers: headers(buildingId) });
   expect(res.ok(), `list reservations for ${amenityId}: ${res.status()}`).toBeTruthy();
   return (await res.json()) as ApiReservation[];
 }
@@ -77,7 +82,7 @@ export async function apiBook(
   request: APIRequestContext,
   o: { building: string; resident: ResidentId; amenityId: string; start: Date; minutes: number },
 ) {
-  return request.post('/api/reservations', {
+  return request.post(`${API}/api/reservations`, {
     headers: headers(o.building, o.resident),
     data: {
       amenityId: o.amenityId,
@@ -88,7 +93,7 @@ export async function apiBook(
 }
 
 export async function apiCancel(request: APIRequestContext, buildingId: string, residentId: string, id: string) {
-  return request.delete(`/api/reservations/${id}`, { headers: headers(buildingId, residentId) });
+  return request.delete(`${API}/api/reservations/${id}`, { headers: headers(buildingId, residentId) });
 }
 
 /** Poll the API until the resident's reservation starting at `start` exists; returns it. */
@@ -142,7 +147,7 @@ export class Scenario {
     const to = from + 24 * 3_600_000;
     for (const [building, amenityIds] of Object.entries(AMENITIES_BY_BUILDING)) {
       for (const amenityId of amenityIds) {
-        const list = await this.request.get(`/api/amenities/${amenityId}/reservations`, {
+        const list = await this.request.get(`${API}/api/amenities/${amenityId}/reservations`, {
           headers: headers(building),
         });
         if (!list.ok()) continue;
@@ -199,9 +204,15 @@ export async function gotoApp(page: Page): Promise<void> {
   await expect(ui.residentSwitcher(page)).toBeVisible();
 }
 
+/** The building-wide list has finished loading (so a following "no rows" assertion isn't vacuous). */
+export async function waitForReservations(page: Page): Promise<void> {
+  await expect(page.getByTestId('reservations')).toHaveAttribute('data-loading', 'false');
+}
+
 export async function selectBuilding(page: Page, buildingId: string): Promise<void> {
   await ui.buildingSwitcher(page).selectOption(buildingId);
   await expect(ui.buildingSwitcher(page)).toHaveValue(buildingId);
+  await waitForReservations(page); // switching reloads the building's bookings
 }
 
 export async function selectResident(page: Page, resident: ResidentId): Promise<void> {
@@ -211,20 +222,14 @@ export async function selectResident(page: Page, resident: ResidentId): Promise<
 
 /**
  * Click the amenity card and wait for the booking form. If `waitForList`, also wait for the
- * reservations request to finish, so a following "no rows" assertion isn't vacuous.
+ * building-wide reservations list to finish loading, so a following "no rows" assertion isn't vacuous.
  */
 export async function openAmenity(page: Page, amenityId: string, opts: { waitForList?: boolean } = {}): Promise<void> {
   const card = ui.amenityCard(page, amenityId);
   await expect(card).toBeVisible();
-  if (opts.waitForList) {
-    await Promise.all([
-      page.waitForResponse((r) => r.url().includes(`/api/amenities/${amenityId}/reservations`) && r.ok()),
-      card.click(),
-    ]);
-  } else {
-    await card.click();
-  }
+  await card.click();
   await expect(page.getByTestId('book-submit')).toBeVisible();
+  if (opts.waitForList) await waitForReservations(page);
 }
 
 /**
@@ -238,7 +243,7 @@ export async function ensureAmenityOpen(page: Page, amenityId: string): Promise<
 /** Fill and submit the booking form (amenity must already be open). Does not assert the outcome. */
 export async function submitBooking(page: Page, o: { start: Date; minutes: number }): Promise<void> {
   await page.getByTestId('book-start').fill(toDatetimeLocal(o.start));
-  await page.getByTestId('book-duration').fill(String(o.minutes));
+  await page.getByTestId('book-end').fill(toDatetimeLocal(new Date(o.start.getTime() + o.minutes * 60_000)));
   await page.getByTestId('book-submit').click();
 }
 

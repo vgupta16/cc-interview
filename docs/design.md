@@ -7,7 +7,7 @@ A thin vertical slice: residents view an amenity's bookings, book a time window,
 **Assumptions**
 
 - A request belongs to one building and one resident, both taken from headers (`X-Building-Id`, `X-Resident-Id`, and `X-Resident-Roles: staff`). These stand in for token claims; a missing header is `401`. The client never sends a resident id in a body.
-- A booking is a free-form half-open interval `[start, end)`, so back-to-back bookings (10–11, then 11–12) don't conflict. Times are UTC instants; showing them in the building's time zone is a UI concern the slice skips.
+- A booking is a free-form half-open interval `[start, end)`, so back-to-back bookings (10–11, then 11–12) don't conflict. Times travel as UTC instants and are shown in the viewer's local time zone (the building's own zone is the production choice, since `Building.TimeZone` exists).
 - `Capacity` is how many bookings may overlap at any instant; one booking uses one unit.
 - Cancelling is a soft state change (`Cancelled`), kept for audit.
 - A resident may hold one active (not cancelled, not ended) booking per amenity. This is a per-amenity policy value, so it's configurable.
@@ -41,7 +41,8 @@ Routes are under `/api`; tenant and resident come from headers. Every non-2xx bo
 | Route | Request | Success | Errors |
 | --- | --- | --- | --- |
 | `GET /api/amenities` | | `200 Amenity[]` for this building | `401` |
-| `GET /api/amenities/{id}/reservations?from=&to=` | optional UTC window | `200 Reservation[]` (active only) | `404 amenity_not_found` |
+| `GET /api/reservations?from=&to=` | optional UTC window | `200 Reservation[]`: every active booking in this building, all amenities, by start time | `401` |
+| `GET /api/amenities/{id}/reservations?from=&to=` | optional UTC window | `200 Reservation[]` (one amenity, active only) | `404 amenity_not_found` |
 | `POST /api/reservations` | `{ amenityId, startUtc, endUtc }` | `201 Reservation` | `400 end_before_start, in_past, max_duration_exceeded` · `404 amenity_not_found` · `409 slot_full, already_has_booking` |
 | `DELETE /api/reservations/{id}` | | `204` (also if already cancelled) | `404 reservation_not_found` · `403 not_owner` |
 
@@ -73,6 +74,8 @@ Abstractions exist only where I expect change. I deliberately did not build a ge
 - **Rules are pluggable.** `IBookingRule` returns a `Failure` (kind, code, message) or nothing, and rules run in DI order. The slice has four: end after start, not in the past, max duration, max active per resident. **Opening hours, a booking horizon and a cancellation cutoff are left out** (they need time-zone and DST decisions from a PM); each is a new optional `AmenityPolicy` field, one rule class and one DI line, with no change to endpoints, service or UI. Capacity is deliberately not a rule, so it can't be skipped by mis-registration.
 - **Storage, identity, time** sit behind `IReservationRepository`, `IRequestContextResolver` and `TimeProvider`, so a database, real auth and fake clocks slot in. Who may cancel is one method, `CanCancel` (owner or staff).
 - **Left out:** real auth, persistence, waitlist, approval flow, fees, recurring bookings (would need a series entity), pagination, a computed `/availability` endpoint (it must reuse the rules pipeline so the client never re-implements them), and notifications (hang them off create/cancel events).
+- **Privacy.** Every booking shows the resident's name to everyone in the building. In production other residents would see "Booked", with names only for the owner and staff; that changes what the API returns, so it's left out here.
+- **Demo sign-in.** The "Demo: sign in as" dropdown stands in for real authentication so a reviewer can act as different residents; a real product takes identity from login.
 - **Idempotency keys.** A retried or double-clicked POST is a different failure from double-booking. Here the one-active-booking rule happens to reject the duplicate, which masks the problem; the real fix is an `Idempotency-Key` header.
 - **Capacity units** (a party of 4, a 3-car block) would be a `Units` field that `Occupancy` sums instead of counting.
 
@@ -84,6 +87,6 @@ Abstractions exist only where I expect change. I deliberately did not build a ge
 
 **Run and verify.** The project targets net9.0; with only a newer runtime installed, prefix commands with `DOTNET_ROLL_FORWARD=Major`.
 
-- `cd backend/Api.Tests && dotnet test`: 139 tests written from this doc's invariants (occupancy sweep, rules, authorization, tenant isolation, concurrent races, HTTP through `WebApplicationFactory`).
-- `cd e2e && npx playwright test`: 10 browser scenarios through the real UI.
+- `cd backend/Api.Tests && dotnet test`: 146 tests written from this doc's invariants (occupancy sweep, rules, authorization, tenant isolation, concurrent races, HTTP through `WebApplicationFactory`).
+- `cd e2e && npx playwright test`: 13 browser scenarios through the real UI.
 - Mutation checks: removing the per-amenity lock turns 7 concurrency tests red, and loosening the capacity comparison turns the browser double-booking scenarios red. Both were reverted.

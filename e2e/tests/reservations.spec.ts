@@ -24,7 +24,7 @@ test.describe('booking and capacity', () => {
     await bookViaForm(page, { start: scenario.at(10), minutes: 60, resident: 'alice' });
 
     await expect(ui.allRows(page)).toHaveCount(1);
-    await expect(ui.allRows(page).first()).toContainText('alice');
+    await expect(ui.allRows(page).first()).toContainText('Alice');
     await expect(ui.bookError(page)).toHaveCount(0);
   });
 
@@ -112,7 +112,7 @@ test.describe('cancel and ownership', () => {
     await selectResident(page, 'bob');
     await ensureAmenityOpen(page, AMENITY.partyRoomA);
     await expect(ui.row(page, alice.id)).toBeVisible();
-    await expect(ui.row(page, alice.id)).toContainText('alice');
+    await expect(ui.row(page, alice.id)).toContainText('Alice');
     await expect(ui.cancelButton(page, alice.id)).toHaveCount(0);
 
     // Back to alice: the button returns.
