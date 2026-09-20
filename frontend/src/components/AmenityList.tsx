@@ -1,4 +1,5 @@
 import type { AmenityResponse } from '../api/generated/api';
+import { formatDuration } from '../format';
 
 interface Props {
   amenities: AmenityResponse[];
@@ -32,7 +33,7 @@ export function AmenityList({ amenities, selectedId, onSelect }: Props) {
               <strong>{a.name}</strong>
               {a.description && <div style={{ color: '#555' }}>{a.description}</div>}
               <div style={{ fontSize: 13, color: '#777', marginTop: 4 }}>
-                capacity {a.capacity} · max {a.maxBookingMinutes} min
+                capacity {a.capacity} · up to {formatDuration(a.maxBookingMinutes)} per booking
               </div>
             </button>
           </li>
