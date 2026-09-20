@@ -1,58 +1,136 @@
 import { useEffect, useState } from 'react';
-import { getAmenities, type AmenityResponse } from './api/generated/api';
+import {
+  cancelReservation,
+  getAmenities,
+  getAmenityReservations,
+  type AmenityResponse,
+  type ReservationResponse,
+} from './api/generated/api';
+import { networkError, toDisplayError } from './api/errors';
+import { apiOptions, BUILDINGS, RESIDENTS, type Session } from './api/session';
+import { AmenityList } from './components/AmenityList';
+import { BookingForm } from './components/BookingForm';
+import { ReservationList } from './components/ReservationList';
 
-// Temporary: the UI rewrite (reservations) replaces this. Building A from the seed data.
-const DEMO_HEADERS = { 'X-Building-Id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' };
-
-/**
- * Worked example: lists amenities from the backend through the generated client.
- *
- * TODO(candidate): build the reservation experience. Suggested (change it to fit your design):
- *   - pick an amenity and see its existing bookings
- *   - create a booking for a time slot (and surface a clear error on a double-book)
- *   - cancel your own booking
- * After you add backend endpoints, run `pnpm gen:api` to get typed hooks/functions here.
- */
 export function App() {
+  const [session, setSession] = useState<Session>({ buildingId: BUILDINGS[0].id, residentId: RESIDENTS[0] });
   const [amenities, setAmenities] = useState<AmenityResponse[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reservations, setReservations] = useState<ReservationResponse[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
+  // Amenities belong to a building: reload (and drop the selection) when the building changes.
   useEffect(() => {
-    getAmenities({ headers: DEMO_HEADERS })
+    let stale = false;
+    setAmenities([]);
+    setSelectedId(null);
+    setError(null);
+    getAmenities(apiOptions(session))
       .then((res) => {
-        if (res.status !== 200) throw new Error(res.data.message);
-        setAmenities(res.data);
+        if (stale) return;
+        if (res.status === 200) setAmenities(res.data);
+        else setError(toDisplayError(res.status, res.data).message);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load amenities'))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((e) => !stale && setError(networkError(e).message));
+    return () => {
+      stale = true;
+    };
+    // Only the building scopes this list; the resident header doesn't change the result.
+  }, [session.buildingId]);
+
+  // Bookings for the selected amenity. reloadKey is bumped after a booking or cancellation.
+  useEffect(() => {
+    if (!selectedId) {
+      setReservations([]);
+      return;
+    }
+    let stale = false;
+    getAmenityReservations(selectedId, undefined, apiOptions(session))
+      .then((res) => {
+        if (stale) return;
+        if (res.status === 200) setReservations(res.data);
+        else setError(toDisplayError(res.status, res.data).message);
+      })
+      .catch((e) => !stale && setError(networkError(e).message));
+    return () => {
+      stale = true;
+    };
+  }, [selectedId, session.buildingId, reloadKey]);
+
+  async function cancel(id: string) {
+    setError(null);
+    setCancellingId(id);
+    try {
+      const res = await cancelReservation(id, apiOptions(session));
+      if (res.status === 204) setReloadKey((k) => k + 1);
+      else setError(toDisplayError(res.status, res.data).message);
+    } catch (e) {
+      setError(networkError(e).message);
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  const selected = amenities.find((a) => a.id === selectedId) ?? null;
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 640, margin: '2rem auto', padding: '0 1rem' }}>
+    <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 720, margin: '2rem auto', padding: '0 1rem' }}>
       <h1>Amenity Reservations</h1>
-      <p style={{ color: '#555' }}>
-        This is the starter. The amenity list below is the worked example — now build reservations.
-      </p>
 
-      {loading && <p>Loading amenities…</p>}
-      {error && (
-        <p style={{ color: '#b00020' }}>
-          Couldn’t reach the API ({error}). Is the backend running on <code>http://localhost:5080</code>?
-        </p>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        <label>
+          Building{' '}
+          <select
+            data-testid="building-switcher"
+            value={session.buildingId}
+            onChange={(e) => setSession({ ...session, buildingId: e.target.value })}
+          >
+            {BUILDINGS.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Signed in as{' '}
+          <select
+            data-testid="resident-switcher"
+            value={session.residentId}
+            onChange={(e) => setSession({ ...session, residentId: e.target.value })}
+          >
+            {RESIDENTS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {error && <p style={{ color: '#b00020' }}>{error}</p>}
+
+      <AmenityList amenities={amenities} selectedId={selectedId} onSelect={setSelectedId} />
+
+      {selected && (
+        <section style={{ marginTop: '1.5rem' }}>
+          <h2 style={{ marginBottom: '0.5rem' }}>{selected.name} bookings</h2>
+          <ReservationList
+            reservations={reservations}
+            residentId={session.residentId}
+            cancellingId={cancellingId}
+            onCancel={cancel}
+          />
+          <BookingForm
+            key={`${selected.id}:${session.residentId}`}
+            amenity={selected}
+            session={session}
+            onBooked={() => setReloadKey((k) => k + 1)}
+          />
+        </section>
       )}
-
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {amenities.map((a) => (
-          <li key={a.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
-            <strong>{a.name}</strong>
-            {a.description && <div style={{ color: '#555' }}>{a.description}</div>}
-            <div style={{ fontSize: 13, color: '#777', marginTop: 4 }}>
-              capacity {a.capacity} · max {a.maxBookingMinutes} min
-            </div>
-          </li>
-        ))}
-      </ul>
     </main>
   );
 }
