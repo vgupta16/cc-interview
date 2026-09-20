@@ -21,6 +21,13 @@ test.describe('tenant isolation', () => {
   }) => {
     await gotoApp(page);
 
+    // Switching buildings must never send a request that mixes one building's headers with the
+    // other's amenity id (that shows up as a 404). Found by exploring the UI by hand.
+    const failedRequests: string[] = [];
+    page.on('response', (r) => {
+      if (r.status() >= 400) failedRequests.push(`${r.status()} ${r.url()}`);
+    });
+
     // Building A: three amenity cards, book the Party Room.
     await expect(ui.amenityCard(page, AMENITY.partyRoomA)).toBeVisible();
     await expect(ui.allAmenityCards(page)).toHaveCount(3);
@@ -51,5 +58,7 @@ test.describe('tenant isolation', () => {
     await selectBuilding(page, BUILDING_A);
     await openAmenity(page, AMENITY.partyRoomA, { waitForList: true });
     await expect(ui.rowsOf(page, 'alice')).toHaveCount(1);
+
+    expect(failedRequests).toEqual([]);
   });
 });

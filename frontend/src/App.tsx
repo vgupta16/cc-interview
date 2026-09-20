@@ -21,11 +21,18 @@ export function App() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Amenities belong to a building: reload (and drop the selection) when the building changes.
+  // Switching building clears the selection in the same update. If it were cleared in an effect,
+  // one render would pair the new building's headers with the old building's amenity id and the
+  // API would (correctly) answer 404.
+  function changeBuilding(buildingId: string) {
+    setSelectedId(null);
+    setSession((s) => ({ ...s, buildingId }));
+  }
+
+  // Amenities belong to a building: reload them when the building changes.
   useEffect(() => {
     let stale = false;
     setAmenities([]);
-    setSelectedId(null);
     setError(null);
     getAmenities(apiOptions(session))
       .then((res) => {
@@ -85,7 +92,7 @@ export function App() {
           <select
             data-testid="building-switcher"
             value={session.buildingId}
-            onChange={(e) => setSession({ ...session, buildingId: e.target.value })}
+            onChange={(e) => changeBuilding(e.target.value)}
           >
             {BUILDINGS.map((b) => (
               <option key={b.id} value={b.id}>
