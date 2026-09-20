@@ -43,6 +43,21 @@ public static class Endpoints
             .Produces<ApiError>(StatusCodes.Status401Unauthorized)
             .Produces<ApiError>(StatusCodes.Status404NotFound);
 
+        app.MapGet("/api/reservations", async Task<IResult> (
+                DateTimeOffset? from, DateTimeOffset? to,
+                HttpRequest http, IRequestContextResolver resolver, ReservationService service) =>
+            {
+                var ctx = resolver.Resolve(http, requireResident: false);
+                if (!ctx.IsSuccess) return ctx.Failure.ToHttpResult();
+
+                var all = await service.ListForBuildingAsync(ctx.Value!.BuildingId, from, to);
+                return Results.Ok(all.Select(ReservationResponse.From).ToList());
+            })
+            .WithName("getReservations")
+            .WithTags("Reservations")
+            .Produces<List<ReservationResponse>>()
+            .Produces<ApiError>(StatusCodes.Status401Unauthorized);
+
         app.MapPost("/api/reservations", async Task<IResult> (
                 CreateReservationRequest body,
                 HttpRequest http, IRequestContextResolver resolver, ReservationService service) =>

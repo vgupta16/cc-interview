@@ -42,4 +42,10 @@ public interface IReservationRepository
 
     /// <summary>Active reservations of an amenity overlapping [from, to) (open-ended when null).</summary>
     Task<IReadOnlyList<Reservation>> ListActiveAsync(Guid buildingId, Guid amenityId, DateTimeOffset? from, DateTimeOffset? to);
+
+    /// <summary>
+    /// Active reservations across <b>every amenity of one building</b> overlapping [from, to)
+    /// (open-ended when null), ordered by start time. Never includes another building's data.
+    /// </summary>
+    Task<IReadOnlyList<Reservation>> ListActiveForBuildingAsync(Guid buildingId, DateTimeOffset? from, DateTimeOffset? to);
 }

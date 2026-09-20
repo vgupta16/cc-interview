@@ -73,6 +73,31 @@ public sealed class InMemoryReservationRepository : IReservationRepository
         }
     }
 
+    public async Task<IReadOnlyList<Reservation>> ListActiveForBuildingAsync(
+        Guid buildingId, DateTimeOffset? from, DateTimeOffset? to)
+    {
+        var start = from ?? DateTimeOffset.MinValue;
+        var end = to ?? DateTimeOffset.MaxValue;
+        var result = new List<Reservation>();
+
+        // Only this building's amenities are visited: state is keyed by (building, amenity).
+        foreach (var entry in _states.Where(e => e.Key.Building == buildingId))
+        {
+            await entry.Value.Gate.WaitAsync();
+            try
+            {
+                result.AddRange(entry.Value.Items.Values.Where(r =>
+                    r.Status.HoldsCapacity() && Occupancy.Overlaps(r.StartUtc, r.EndUtc, start, end)));
+            }
+            finally
+            {
+                entry.Value.Gate.Release();
+            }
+        }
+
+        return result.OrderBy(r => r.StartUtc).ToList();
+    }
+
     private sealed class Bookings(
         InMemoryReservationRepository repo, Guid buildingId, Guid amenityId, AmenityState state) : IAmenityBookings
     {

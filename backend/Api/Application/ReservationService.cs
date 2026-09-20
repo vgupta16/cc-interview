@@ -111,6 +111,13 @@ public sealed class ReservationService(
             await reservations.ListActiveAsync(buildingId, amenityId, from, to));
     }
 
+    /// <summary>
+    /// Every active reservation in the building, across all amenities, overlapping [from, to),
+    /// ordered by start time. Cannot fail: the building scope is the only filter.
+    /// </summary>
+    public Task<IReadOnlyList<Reservation>> ListForBuildingAsync(Guid buildingId, DateTimeOffset? from, DateTimeOffset? to)
+        => reservations.ListActiveForBuildingAsync(buildingId, from, to);
+
     private static Failure AmenityNotFound() =>
         new(ErrorKind.NotFound, ErrorCodes.AmenityNotFound, "That amenity doesn't exist.");
 

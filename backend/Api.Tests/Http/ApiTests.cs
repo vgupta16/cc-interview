@@ -211,6 +211,27 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Get_Reservations_ListsTheWholeBuildingAndNothingFromAnother()
+    {
+        var alice = Client(A, "alice-all");
+        var bob = Client(A, "bob-all");
+        var partyId = await BookOk(alice, SeedData.PartyRoomA, Hour(12), Hour(13));
+        var gymId = await BookOk(bob, SeedData.GymA, Hour(9), Hour(10));
+        await BookOk(Client(B, "carol-all"), SeedData.PartyRoomB, Hour(10), Hour(11));
+
+        var inA = await Json(await alice.GetAsync("/api/reservations"));
+        var inB = await Json(await Client(B, "carol-all").GetAsync("/api/reservations"));
+
+        Assert.Equal([gymId, partyId], inA.EnumerateArray().Select(r => r.GetProperty("id").GetGuid()));
+        var onlyB = Assert.Single(inB.EnumerateArray());
+        Assert.Equal(SeedData.PartyRoomB, onlyB.GetProperty("amenityId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Get_Reservations_WithoutBuildingHeader_Is401MissingBuilding() =>
+        await AssertError(await Client().GetAsync("/api/reservations"), HttpStatusCode.Unauthorized, ErrorCodes.MissingBuilding);
+
+    [Fact]
     public async Task Post_OverlappingBookingOnACapacityOneAmenity_Is409SlotFull()
     {
         await BookOk(Client(A, "alice-full"), SeedData.PartyRoomA, Hour(10), Hour(11));
