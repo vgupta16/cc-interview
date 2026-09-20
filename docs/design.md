@@ -73,9 +73,9 @@ Stable error codes: `missing_building`, `missing_resident` (401); `end_before_st
 
 **Failure mode.** A check-then-act race (TOCTOU). Two residents book the last unit of an amenity at the same moment. Both requests read "1 of 2 used", both pass the check, both insert, and the amenity ends up overbooked. The starter's `List<Reservation>` also isn't safe for concurrent writers.
 
-**Mechanism.** The read, the check and the write happen inside one critical section per amenity. `IReservationRepository.ExecuteExclusiveAsync(buildingId, amenityId, work)` runs `work` while holding that amenity's lock (in memory, a per-amenity lock keyed by amenity ID). Inside `work` the service loads the amenity's active reservations, runs the booking rules, checks capacity, and inserts. Different amenities never block each other.
+**Mechanism.** The read, the check and the write happen inside one critical section per amenity. `IReservationRepository.ExecuteExclusiveAsync(buildingId, amenityId, work)` runs `work` while holding that amenity's lock (in memory, a `SemaphoreSlim` per `(building, amenity)`; a plain `lock` can't span the `await` inside the callback). Inside `work` the service loads the amenity's active reservations, runs the booking rules, checks capacity, and inserts. Different amenities never block each other.
 
-**Capacity check.** Counting "overlapping bookings >= capacity" is wrong: with capacity 2 and bookings 9–10 and 10–11 (which never overlap each other), a request for 9–11 overlaps both, so a naive count of 2 rejects it although occupancy never exceeds 1. `Occupancy.MaxConcurrent` sweeps the start and end events of the overlapping bookings plus the candidate and returns the true peak. The request is rejected only if the peak would exceed `Capacity`.
+**Capacity check.** Counting "overlapping bookings >= capacity" is wrong: with capacity 2 and bookings 9–10 and 10–11 (which never overlap each other), a request for 9–11 overlaps both, so a naive count of 2 rejects it although occupancy never exceeds 1. `Occupancy.MaxConcurrent` sweeps the start and end events of the existing bookings, clipped to the requested window, and returns the true peak. The candidate fits only if that peak is strictly below `Capacity`, so it is rejected exactly when adding it would push occupancy over capacity somewhere in its window.
 
 **Alternative rejected: a fixed slot grid with a unique key** on `(amenityId, slotStart, seatIndex)`. It is trivially correct and maps directly to a database unique constraint, so it would be my choice if the PM answers "fixed slots". I rejected it because free-form durations make it awkward: a 90-minute booking must claim several slot rows atomically, and every capacity or slot-size change becomes a data migration.
 
@@ -86,7 +86,7 @@ Stable error codes: `missing_building`, `missing_resident` (401); `end_before_st
 - Every tenant-owned entity carries `BuildingId`, and the building is resolved once per request by a single `IRequestContextResolver` (headers here, a validated token claim in production). The building never comes from a request body or route.
 - Every repository and catalog method requires `buildingId`, so a query can't be written without scoping.
 - A resource in another building returns **404, not 403**, so the API doesn't reveal that an ID exists.
-- Locks are keyed by amenity ID, which is globally unique, so one tenant can't block another.
+- Exclusive-section state is keyed by `(building, amenity)`, so tenants can't share state or block each other even by mistake. Reservation ids are also checked against the caller's building on lookup.
 - In production I'd add defense in depth: a global query filter in the data layer and Postgres row-level security, so a missed `WHERE` can't leak data.
 - The slice seeds two buildings so isolation is testable and demonstrable.
 
@@ -115,4 +115,9 @@ Abstractions exist only where I expect change, and I deliberately did not build 
 
 ## 8. Changes from the draft
 
-_To be filled in when the implementation is finished._
+- **Error body**: a small typed `ApiError { code, message }` instead of RFC 7807 ProblemDetails, so the generated client types the error and the UI can branch on `code`.
+- **Identity resolver**: the tenant/identity seam is `IRequestContextResolver` (not `IRequestContext`), and missing headers are `401`.
+- **Lock key**: `(building, amenity)` rather than amenity id alone (stricter, same cost).
+- **Scaffold changes**: `InMemoryStore` was replaced by `SeedData`, `InMemoryAmenityCatalog` and `InMemoryReservationRepository`; the orval client now returns `{ data, status }` (`includeHttpResponseReturnType: true`) because the default swallowed non-2xx responses; `frontend/openapi.json` was regenerated from the live API; the amenity response is `AmenityResponse` and keeps `maxBookingMinutes`.
+- **Known gap**: a request body that fails framework binding (for example missing `required` fields) yields the framework's own `400`, not an `ApiError`, and that check runs before the header check. The UI always sends a valid body. A production version would do authentication first and format binding errors as `ApiError`.
+- **Running on a machine that only has a newer .NET runtime**: the project targets net9.0; with only .NET 10 installed, run with `DOTNET_ROLL_FORWARD=Major`.
