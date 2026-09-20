@@ -28,19 +28,32 @@ public interface IBookingRule
 /// <summary><c>end_before_start</c> (Validation): the window must have positive length.</summary>
 public sealed class EndAfterStartRule : IBookingRule
 {
-    public Failure? Evaluate(BookingContext context) => throw new NotImplementedException();
+    public Failure? Evaluate(BookingContext context) =>
+        context.EndUtc > context.StartUtc
+            ? null
+            : new Failure(ErrorKind.Validation, ErrorCodes.EndBeforeStart, "The booking must end after it starts.");
 }
 
 /// <summary><c>in_past</c> (Validation): the booking must not start before <c>NowUtc</c>.</summary>
 public sealed class NotInPastRule : IBookingRule
 {
-    public Failure? Evaluate(BookingContext context) => throw new NotImplementedException();
+    public Failure? Evaluate(BookingContext context) =>
+        context.StartUtc >= context.NowUtc
+            ? null
+            : new Failure(ErrorKind.Validation, ErrorCodes.InPast, "The booking can't start in the past.");
 }
 
 /// <summary><c>max_duration_exceeded</c> (Validation): length must be &lt;= <c>Policy.MaxBookingMinutes</c>.</summary>
 public sealed class MaxDurationRule : IBookingRule
 {
-    public Failure? Evaluate(BookingContext context) => throw new NotImplementedException();
+    public Failure? Evaluate(BookingContext context)
+    {
+        var max = context.Amenity.Policy.MaxBookingMinutes;
+        return (context.EndUtc - context.StartUtc).TotalMinutes <= max
+            ? null
+            : new Failure(ErrorKind.Validation, ErrorCodes.MaxDurationExceeded,
+                $"{context.Amenity.Name} can be booked for at most {max} minutes at a time.");
+    }
 }
 
 /// <summary>
@@ -49,5 +62,15 @@ public sealed class MaxDurationRule : IBookingRule
 /// </summary>
 public sealed class OneActivePerResidentRule : IBookingRule
 {
-    public Failure? Evaluate(BookingContext context) => throw new NotImplementedException();
+    public Failure? Evaluate(BookingContext context)
+    {
+        var max = context.Amenity.Policy.MaxActivePerResident;
+        var held = context.ActiveReservations.Count(r =>
+            r.Status.HoldsCapacity() && r.ResidentId == context.Actor.ResidentId && r.EndUtc > context.NowUtc);
+
+        return held < max
+            ? null
+            : new Failure(ErrorKind.Conflict, ErrorCodes.AlreadyHasBooking,
+                $"You already have {(max == 1 ? "a booking" : $"{max} bookings")} for {context.Amenity.Name}. Cancel it to book another.");
+    }
 }
