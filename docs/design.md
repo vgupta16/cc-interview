@@ -59,6 +59,14 @@ Not built: a computed `/availability` endpoint (free windows for a day). The UI 
 
 Stable error codes: `missing_building`, `missing_resident` (401); `end_before_start`, `in_past`, `max_duration_exceeded` (400); `amenity_not_found`, `reservation_not_found` (404); `not_owner` (403); `already_has_booking`, `slot_full` (409).
 
+**UI behavior contract** (what the browser tests rely on):
+
+- `building-switcher` and `resident-switcher` are `<select>`s. Building option values are the building GUIDs; resident option values are `alice`, `bob`, `carol`. Defaults: Building A, `alice`. Every API call sends the selected building and resident as `X-Building-Id` and `X-Resident-Id`.
+- Clicking `amenity-card-<amenityId>` selects that amenity: its active reservations render as `reservation-row-<reservationId>` (row text includes the resident id and the UTC start/end) and the booking form appears. Switching building reloads the amenity list and clears the selection.
+- `book-start` is an `<input type="datetime-local">` (interpreted in the browser's local zone and sent as UTC). `book-duration` is a number input in minutes. `book-submit` submits.
+- On success the list refreshes and the form clears. On failure, `booking-error` is shown with the server's message and a `data-code` attribute holding the error `code`; it is absent otherwise.
+- `cancel-<reservationId>` exists only on rows owned by the currently selected resident. Cancelling removes the row.
+
 **UI test contract (`data-testid`)**: `building-switcher`, `resident-switcher`, `amenity-card-<amenityId>`, `book-start`, `book-duration`, `book-submit`, `booking-error`, `reservation-row-<reservationId>`, `cancel-<reservationId>`. Seed data: buildings `aaaaaaaa-…` (Maple Court) and `bbbbbbbb-…` (Harbour Tower); Building A amenities keep the starter ids `1111…` Party Room (capacity 1), `2222…` Gym (capacity 2), `3333…` Guest Parking (capacity 1).
 
 ## 4. Preventing double-booking
