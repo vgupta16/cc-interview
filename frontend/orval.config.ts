@@ -15,9 +15,10 @@ export default defineConfig({
       client: 'fetch',
       clean: true,
       override: {
-        // Return the parsed response body directly (e.g. Amenity[]) rather than a
-        // wrapper object — simpler to consume from components.
-        fetch: { includeHttpResponseReturnType: false },
+        // Return { data, status, headers } as a union discriminated by status. Do NOT switch
+        // this off: without it the generated fetch wrappers never throw on non-2xx, so a 409
+        // "slot_full" would come back looking like a successful body.
+        fetch: { includeHttpResponseReturnType: true },
       },
     },
   },

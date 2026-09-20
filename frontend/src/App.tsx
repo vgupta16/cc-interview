@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getAmenities, type Amenity } from './api/generated/api';
+import { getAmenities, type AmenityResponse } from './api/generated/api';
+
+// Temporary: the UI rewrite (reservations) replaces this. Building A from the seed data.
+const DEMO_HEADERS = { 'X-Building-Id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' };
 
 /**
  * Worked example: lists amenities from the backend through the generated client.
@@ -11,13 +14,16 @@ import { getAmenities, type Amenity } from './api/generated/api';
  * After you add backend endpoints, run `pnpm gen:api` to get typed hooks/functions here.
  */
 export function App() {
-  const [amenities, setAmenities] = useState<Amenity[]>([]);
+  const [amenities, setAmenities] = useState<AmenityResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAmenities()
-      .then((data) => setAmenities(data))
+    getAmenities({ headers: DEMO_HEADERS })
+      .then((res) => {
+        if (res.status !== 200) throw new Error(res.data.message);
+        setAmenities(res.data);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load amenities'))
       .finally(() => setLoading(false));
   }, []);

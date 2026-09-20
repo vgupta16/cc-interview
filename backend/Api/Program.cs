@@ -1,10 +1,28 @@
-using Api.Domain;
+using System.Text.Json.Serialization;
+using Api.Application;
+using Api.Http;
 using Api.Store;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
-builder.Services.AddSingleton<InMemoryStore>();
+
+// Enums travel as strings ("Active"), both on the wire and in the OpenAPI schema.
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// Persistence and tenancy/identity sit behind interfaces so they can be swapped without touching the rest.
+builder.Services.AddSingleton<IAmenityCatalog, InMemoryAmenityCatalog>();
+builder.Services.AddSingleton<IReservationRepository, InMemoryReservationRepository>();
+builder.Services.AddSingleton<IRequestContextResolver, HeaderRequestContextResolver>();
+builder.Services.AddSingleton(TimeProvider.System);
+
+// Booking rules run in registration order: validation first, then conflicts.
+// A new rule is one class plus one line here.
+builder.Services.AddSingleton<IBookingRule, EndAfterStartRule>();
+builder.Services.AddSingleton<IBookingRule, NotInPastRule>();
+builder.Services.AddSingleton<IBookingRule, MaxDurationRule>();
+builder.Services.AddSingleton<IBookingRule, OneActivePerResidentRule>();
+builder.Services.AddSingleton<ReservationService>();
 
 var app = builder.Build();
 
@@ -17,19 +35,11 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
    .WithName("getHealth")
    .WithTags("System");
 
-// --- Amenities (worked example — read this, then do the same for reservations) ---
-app.MapGet("/api/amenities", (InMemoryStore store) => Results.Ok(store.Amenities))
-   .WithName("getAmenities")
-   .WithTags("Amenities")
-   .Produces<IReadOnlyList<Amenity>>();
-
-// --- Reservations (YOUR TASK) ---------------------------------------------
-// TODO(candidate): design and implement the reservation endpoints.
-// A reasonable starting set (change it to fit your design):
-//   GET    /api/amenities/{amenityId}/reservations   -> list bookings for an amenity
-//   POST   /api/reservations                          -> create a booking (must not double-book)
-//   DELETE /api/reservations/{id}                     -> cancel a booking
-//
-// Explain your design decisions in the design doc — including the ones you don't implement.
+// --- Amenities and reservations (see Http/Endpoints.cs) ---------------------
+app.MapAmenityEndpoints();
+app.MapReservationEndpoints();
 
 app.Run();
+
+// Lets integration tests use WebApplicationFactory<Program>.
+public partial class Program;
