@@ -285,22 +285,67 @@ try {
     body: create(PARTY_A, `${D}T15:00:00+00:00`, 30)
   });
 
-  console.log("== Concurrency (20 parallel creates, Party Room, capacity 1)");
-  const statuses = await Promise.all(
-    Array.from({ length: 20 }, (_, i) =>
-      fetch(`${API}/api/reservations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-RESIDENT-ID": i % 2 === 0 ? A1 : A2
-        },
-        body: JSON.stringify(create(PARTY_A, `${D}T12:00:00Z`, 60))
-      }).then((res) => res.status)
+  console.log("== Concurrency (50 rounds of 20 parallel creates, Party Room, capacity 1)");
+  // Warm the client connections before racing. Consume every body so connections can be reused.
+  // Repetition improves race detection but does not force a particular server interleaving.
+  for (let round = 0; round < 3; round++) {
+    await Promise.all(
+      Array.from({ length: 20 }, async () => {
+        const res = await fetch(`${API}/health`);
+        await res.arrayBuffer();
+        if (res.status !== 200) throw new Error(`Concurrency warm-up returned ${res.status}`);
+      })
+    );
+  }
+
+  const concurrencyFailures = [];
+  // Adjacent one-hour windows, separate from the other checks and well within the booking horizon.
+  const firstRaceStart = Date.parse(`${utcDate(3)}T00:00:00Z`);
+  const raceStarts = Array.from({ length: 50 }, (_, i) => firstRaceStart + i * 2 * SLOT_MS);
+  for (const [round, start] of raceStarts.entries()) {
+    const statuses = await Promise.all(
+      Array.from({ length: 20 }, async (_, i) => {
+        const res = await fetch(`${API}/api/reservations`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-RESIDENT-ID": i % 2 === 0 ? A1 : A2
+          },
+          body: JSON.stringify(create(PARTY_A, utcTime(start), 60))
+        });
+        await res.arrayBuffer();
+        return res.status;
+      })
+    );
+    const created = statuses.filter((status) => status === 201).length;
+    const conflicts = statuses.filter((status) => status === 409).length;
+    if (created !== 1 || conflicts !== 19) {
+      concurrencyFailures.push(`round ${round + 1}: ${statuses.join(", ")}`);
+    }
+  }
+
+  // Check stored results too: response counts alone could miss lost writes in an unsafe store.
+  const raceReservations = (
+    await Promise.all(
+      [A1, A2].map(async (resident) => {
+        const res = await fetch(`${API}/api/reservations/mine`, { headers: { "X-RESIDENT-ID": resident } });
+        const bookings = await res.json();
+        if (res.status !== 200 || !Array.isArray(bookings)) throw new Error("Couldn't read concurrency results");
+        return bookings;
+      })
     )
+  ).flat();
+  for (const [round, start] of raceStarts.entries()) {
+    const stored = raceReservations.filter((booking) => booking.amenityId === PARTY_A && Date.parse(booking.startUtc) === start);
+    if (stored.length !== 1 || Date.parse(stored[0].endUtc) !== start + 2 * SLOT_MS) {
+      concurrencyFailures.push(`round ${round + 1}: expected one stored one-hour reservation, got ${JSON.stringify(stored)}`);
+    }
+  }
+  report(
+    concurrencyFailures.length === 0,
+    "all 50 rounds: exactly 1 x 201, 19 x 409, and 1 stored reservation",
+    `${concurrencyFailures.length} problems; first: ${concurrencyFailures.slice(0, 3).join("; ")}`
   );
-  const created = statuses.filter((s) => s === 201).length;
-  const conflicts = statuses.filter((s) => s === 409).length;
-  report(created === 1 && conflicts === 19, "exactly 1 x 201 and 19 x 409", `got ${statuses.join(", ")}`);
 
   console.log("== Crossing midnight (Guest Parking)");
   r = await req("A2 23:00 for 120 minutes", 201, "/api/reservations", {
