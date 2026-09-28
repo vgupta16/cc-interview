@@ -2,10 +2,9 @@ import { defineConfig } from 'orval';
 
 // Generates a typed client from the API's OpenAPI spec.
 //
-// By default we read a committed snapshot (./openapi.json) so `pnpm gen:api` works
-// even before the backend is running. To regenerate from the LIVE backend instead
-// (recommended once you add endpoints), start the API and point `input` at:
-//   http://localhost:5080/openapi/v1.json
+// The input is the committed snapshot (./openapi.json), so `pnpm gen:api` works on a fresh
+// clone without the backend running. After an API change, refresh the snapshot from the
+// backend and commit it with the regenerated client (AGENTS.md, "Adding or changing an endpoint").
 export default defineConfig({
   amenities: {
     input: './openapi.json',
@@ -15,10 +14,12 @@ export default defineConfig({
       client: 'fetch',
       clean: true,
       override: {
-        // Return the parsed response body directly (e.g. Amenity[]) rather than a
-        // wrapper object — simpler to consume from components.
-        fetch: { includeHttpResponseReturnType: false },
-      },
-    },
-  },
+        // Return { data, status, headers } typed per declared status, so the UI can
+        // branch on 401/404/409 instead of treating an error body as success.
+        fetch: {
+          includeHttpResponseReturnType: true
+        }
+      }
+    }
+  }
 });
